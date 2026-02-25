@@ -13,7 +13,7 @@
  * - Use IORedis.Cluster for cluster connections
  * - Cluster tests may need longer timeouts
  * - Key slot distribution affects certain operations
- * - Use {queueName} hash tags to ensure keys land on same slot
+ * - Use \{queueName\} hash tags to ensure keys land on same slot
  *
  * Execution: yarn test (runs pretest + vitest)
  *            npx vitest tests/<file>.test.ts (single file)
