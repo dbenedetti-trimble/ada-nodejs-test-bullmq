@@ -1,0 +1,197 @@
+---
+description: ADA-generated essential development setup and workflow instructions
+alwaysApply: true
+---
+
+# BullMQ Development Setup
+
+## Quick Reference
+
+### Starting Services
+
+Start Redis (required for tests):
+
+```bash
+docker-compose up -d
+```
+
+Start Redis Cluster (for cluster tests):
+
+```bash
+docker-compose --profile cluster up -d
+```
+
+Start Redis Cluster with Authentication:
+
+```bash
+docker-compose --profile cluster-auth up -d
+```
+
+Stop services:
+
+```bash
+docker-compose down
+```
+
+### Running Tests
+
+Run all tests:
+
+```bash
+yarn test
+```
+
+Run tests with Vitest watch mode:
+
+```bash
+yarn test:watch
+```
+
+Run tests with Vitest UI:
+
+```bash
+yarn test:vitest:ui
+```
+
+Run tests with coverage:
+
+```bash
+yarn coverage
+```
+
+### Package Management
+
+Install dependencies:
+
+```bash
+yarn install
+```
+
+Add a new dependency:
+
+```bash
+yarn add <package-name>
+```
+
+Add a dev dependency:
+
+```bash
+yarn add -D <package-name>
+```
+
+Update dependencies:
+
+```bash
+yarn upgrade
+```
+
+### Build and Compilation
+
+Build the project (runs pretest, TypeScript compilation, copies Lua scripts):
+
+```bash
+yarn build
+```
+
+TypeScript compilation only:
+
+```bash
+yarn tsc:all
+```
+
+Generate raw Lua scripts:
+
+```bash
+yarn generate:raw:scripts
+```
+
+### Linting and Formatting
+
+Run ESLint:
+
+```bash
+yarn lint
+```
+
+Fix ESLint issues automatically:
+
+```bash
+yarn eslint:fix
+```
+
+Format code with Prettier:
+
+```bash
+yarn prettier
+```
+
+Quick format staged files:
+
+```bash
+yarn pretty:quick
+```
+
+Check for circular dependencies:
+
+```bash
+yarn circular:references
+```
+
+### Code Quality
+
+Run lint checks on staged files (pre-commit):
+
+```bash
+yarn lint:staged
+```
+
+### Development Workflow
+
+1. Install dependencies: `yarn install`
+2. Start Redis: `docker-compose up -d`
+3. Run tests: `yarn test`
+4. Make changes to source code in `src/`
+5. Format and lint: `yarn prettier && yarn lint`
+6. Build: `yarn build`
+7. Commit using conventional commit format (enforced by commitlint)
+
+### Technology Stack
+
+- **Language**: TypeScript 5.9.3
+- **Package Manager**: Yarn 1.22.22
+- **Test Framework**: Vitest 4.0.18
+- **Code Quality**: ESLint 9.39.2, Prettier 3.8.1
+- **Build Tool**: TypeScript Compiler (tsc)
+- **Runtime**: Node.js (types: @types/node 18.19.130)
+- **Database**: Redis (via ioredis 5.9.3)
+
+### Environment Variables
+
+- `REDIS_HOST`: Redis host for tests (default: localhost)
+- `BULLMQ_TEST_PREFIX`: Prefix for test queues (default: bull)
+- `CI`: Set to true in CI environments for longer timeouts
+
+### Testing Notes
+
+- Tests use Vitest with sequential execution (no parallel tests)
+- Redis connection is required for all tests
+- Tests use unique queue names (UUID-based) to avoid conflicts
+- Cleanup happens in `afterEach` hooks
+- Coverage thresholds: lines 80%, functions 80%, branches 70%, statements 80%
+
+### Commit Message Format
+
+This project uses semantic-release with conventional commit format:
+
+- `feat:` - New features
+- `fix:` - Bug fixes
+- `docs:` - Documentation changes
+- `chore:` - Maintenance tasks
+- `refactor:` - Code refactoring
+- `test:` - Test changes
+- `perf:` - Performance improvements
+
+Special tags for multi-language support:
+- `[python]` - Python-specific changes (no release)
+- `[elixir]` - Elixir-specific changes (no release)
+- `[php]` - PHP-specific changes (no release)

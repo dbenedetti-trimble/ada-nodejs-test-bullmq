@@ -1,0 +1,16 @@
+time,protocol_version,session_id,prd_id,type,phase,log_name,value,reason_code
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OBSERVABILITY,setup,phase_start,null,null
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OBSERVABILITY,setup,cursor_model_name,null,claude-4-sonnet
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OBSERVABILITY,setup,cursor_version,null,0.45.6
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OBSERVABILITY,setup,phase_setup_completion_check_performed,null,not_exists
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OBSERVABILITY,setup,cursor_rules_analyzed,0,null
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OBSERVABILITY,setup,cursor_rules_created,1,null
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OPERATIONAL,setup,workspace_files_created,1,null
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OBSERVABILITY,setup,development_workflow_documented,1,null
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OBSERVABILITY,setup,test_execution_guide_created,1,null
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OBSERVABILITY,setup,test_templates_created,5,null
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OPERATIONAL,setup,workspace_files_created,7,null
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OBSERVABILITY,setup,setup_validation_completed,null,success
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OPERATIONAL,setup,workspace_files_created,8,null
+2026-02-25T00:16:59.176Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OBSERVABILITY,setup,context_size_percentage,33,null
+2026-02-25T00:22:24.316Z,2.16.0,PHASE_SETUP_ada-nodejs-test-bullmq_2026-02-25_001659176,null,OBSERVABILITY,setup,phase_end,null,null
