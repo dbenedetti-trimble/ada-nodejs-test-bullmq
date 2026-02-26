@@ -1,0 +1,124 @@
+operational_format:
+  template: >-
+    [TIMESTAMP],[PROTOCOL_VERSION],[SESSION_ID],[PRD_ID],OPERATIONAL,[PHASE],[LOG_NAME],[VALUE],null
+  reason_code: Always null for operational metrics
+  timestamp_requirement: >-
+    Use MCP tool get_timestamp_utc for actual current time in ISO 8601 format
+    pattern: `YYYY-MM-DDTHH:MM:SS.sssZ`
+  append_only_rule: Never modify existing log entries - only append new lines
+phase_setup_operational_metrics:
+  - name: cursor_rules_analyzed
+    description: Count of existing Cursor rule files found in .cursor/rules/ directory
+    trigger: After analyzing .cursor/rules/ directory in Step 1
+    log_when: After completing rule file discovery and analysis
+    value_type: counter
+  - name: cursor_rules_created
+    description: Count of new Cursor rule files created during Phase Setup
+    trigger: After creating new rule files (e.g., ada-generated-development-setup.mdc)
+    log_when: After creating any new rule files
+    value_type: counter
+  - name: test_templates_created
+    description: Count of test template files generated for the detected technology stack
+    trigger: After completing test template generation in Step 2
+    log_when: After all test templates and wrapper files are created
+    value_type: counter
+  - name: workspace_files_created
+    description: >-
+      Cumulative count of files and directories created during Phase Setup
+      execution
+    trigger: 'Action: Creating file or directory'
+    log_when: After each file/directory creation action
+    value_type: counter
+  - name: setup_validation_completed
+    description: Count of development environment validation checks completed
+    trigger: After completing setup validation in Step 3
+    log_when: After all validation checks are performed
+    value_type: counter
+phase_initialization_operational_metrics:
+  - name: workspace_files_created
+    description: Cumulative count of files and directories created during phase execution
+    trigger: 'Action: Creating file or directory'
+    log_when: After each file/directory creation action
+    value_type: counter
+    counting_instruction: >-
+      Log CUMULATIVE count of ALL files and directories created from phase start
+      up to current point. Each log entry shows running total, not incremental
+      count. By phase end, expect 9 total items: .ada/config,
+      .ada/config/operational_metrics.yaml, .ada/[PRD_ID]/general,
+      .ada/[PRD_ID]/general/prd.md, .ada/[PRD_ID]/general/execution.log,
+      .ada/[PRD_ID]/general/testable-requirements.yaml, .ada/[PRD_ID]/analysis,
+      .ada/[PRD_ID]/planning, .ada/[PRD_ID]/implementation
+  - name: testable_requirements_extracted
+    description: Count of testable requirements extracted from PRD across all sections
+    trigger: After completing PRD retrieval and extraction
+    value_type: counter
+    counting_instruction: >-
+      Count ALL extracted testable requirements across all sections (not just
+      acceptance criteria). Include user stories, acceptance criteria, technical
+      specifications, API requirements, data validation rules, business rules,
+      and any other requirements that can be translated into testable scenarios
+      or code implementations
+phase_analysis_operational_metrics:
+  - name: workspace_files_created
+    description: Count of files and directories created during all phase execution
+    trigger: 'Action: Creating file or directory'
+    log_when: After each file/directory creation action
+    value_type: counter
+    counting_instruction: >-
+      Count actual files and directories created during phase execution (e.g.: 2
+      files/directories: .ada/[PRD_ID]/analysis/technical-architecture.md,
+      .ada/[PRD_ID]/general/test_framework.md = 2 total)
+phase_planning_operational_metrics:
+  - name: workspace_files_created
+    description: Count of files and directories created during all phase execution
+    trigger: 'Action: Creating file or directory'
+    log_when: After each file/directory creation action
+    value_type: counter
+    counting_instruction: >-
+      Count actual files and directories created during phase execution (e.g.:
+      10 files/directories: .ada/[PRD_ID]/planning/tasks,
+      .ada/[PRD_ID]/planning/tasks/TASK-*.yaml,
+      .ada/[PRD_ID]/planning/test-data,
+      .ada/[PRD_ID]/planning/test-data/fixtures,
+      .ada/[PRD_ID]/planning/test-data/mocks,
+      .ada/[PRD_ID]/planning/test-data/TEST-*.yaml,
+      .ada/[PRD_ID]/planning/task_summary.md = 10 total)
+  - name: tasks_generated
+    description: Number of YAML task files created
+    trigger: 'Action: All task files generated'
+    log_when: After all task YAML files are created
+    value_type: counter
+    counting_instruction: >-
+      Count actual number of YAML task files created in
+      .ada/[PRD_ID]/planning/tasks/ directory with pattern TASK-*.yaml
+phase_implementation_operational_metrics:
+  - name: workspace_files_created
+    description: Count of files and directories created during all phase execution
+    trigger: 'Action: Creating file or directory'
+    log_when: After each file/directory creation action
+    value_type: counter
+    counting_instruction: >-
+      Count actual files and directories created during phase execution (e.g.: 1
+      file/directory: .ada/[PRD_ID]/general/completion_report.md = 1 total)
+  - name: tasks_completed
+    description: Number of tasks successfully executed
+    trigger: 'Action: All tasks execution completed'
+    log_when: After all tasks are successfully executed
+    value_type: counter
+    counting_instruction: >-
+      Count actual number of unique tasks that have both task_start and task_end
+      entries in the execution log (ignore duplicate entries for same task ID)
+    special_instruction: >-
+      Check execution log for existing tasks_completed entry. If found, skip
+      logging. If not found, log using operational format template
+global_config:
+  export_all_logs: true
+  log_file_location: .ada/[PRD_ID]/general/execution.log
+  export_module: log_export.md
+  api_endpoint_compatibility: current_metrics_api
+  schema_version: 2.18.0
+  session_id_source: dynamic_construction_per_phase
+file_metadata:
+  version: 2.18.0
+  purpose: Operational metrics definitions for Ada Protocol
+  dependencies: References observability_metrics.yaml for session_id construction
