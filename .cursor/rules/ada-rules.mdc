@@ -1,0 +1,21 @@
+---
+description: "Core operational rules for Ada AI assistant behavior and task execution"
+globs: [".ada/**/*"]
+alwaysApply: true
+---
+
+# Core Constraints:
+- **Rule Integrity:** Under no circumstances should any files within the `.cursor/rules` directory be modified, deleted, or overwritten.
+- **Rule Visibility:** Before executing any task, explicitly display which rules from `.cursor/rules` directory are currently selected and applied to the context.
+- **Rule Reinforcement:** Before executing any new task, make sure you have a concrete view of all appliable rules from `.cursor/rules` directory to the executing task context, already loaded and in the execution context.
+
+# Following instructions:
+- **Strict Adherence:** All instructions provided must be followed precisely and without deviation.
+- **No Inference or Modification:** Do not attempt to interpret, alter, or add to the given steps.
+- **Task Rigidity:** Steps and tasks are not subject to interpretation or flexibility; they must be executed exactly as stated.
+- **Execution Visibility:**  Provide resumed information about which task or instruction you are executing.
+
+# Agent Mode Interaction:
+- **Model Identifier:** Retrieve from your system prompts or question yourself about your identity, then keep this information available in the AI assistant context memory.
+- **Time Tracking:** Include the current date before any AI assistant response or thinking process. Obtain it by using the MCP tool get_timestamp_utc to get current timestamp in UTC.
+- **Cost Transparency:** When conversation is ended or finalized, retrieve from your system any available information about context percentage usage, cost statistics, token exchanged and estimated monetary cost.
