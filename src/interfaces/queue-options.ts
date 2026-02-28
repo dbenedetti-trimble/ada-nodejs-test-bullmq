@@ -2,6 +2,7 @@ import { AdvancedRepeatOptions } from './advanced-options';
 import { DefaultJobOptions } from './base-job-options';
 import { ConnectionOptions } from './redis-options';
 import { Telemetry } from './telemetry';
+import { LifecycleLogger, LifecycleEvent } from './lifecycle-logger';
 
 export enum ClientType {
   blocking = 'blocking',
@@ -38,6 +39,20 @@ export interface QueueBaseOptions {
    * Telemetry client
    */
   telemetry?: Telemetry;
+
+  /**
+   * Optional structured lifecycle logger implementation.
+   * When provided, BullMQ calls the appropriate log level method at key
+   * job lifecycle points. No logging occurs when this option is omitted.
+   */
+  logger?: LifecycleLogger;
+
+  /**
+   * Subset of lifecycle events to log. When omitted but `logger` is set,
+   * all lifecycle events are logged. When provided, only the listed events
+   * produce log calls.
+   */
+  logEvents?: LifecycleEvent[];
 
   /**
    * Skip waiting for connection ready.

@@ -386,6 +386,17 @@ export class Queue<
       );
       this.emit('waiting', job as JobBase<DataType, ResultType, NameType>);
 
+      if (this.shouldLog('job:added')) {
+        this.opts.logger!.debug({
+          timestamp: Date.now(),
+          event: 'job:added',
+          queue: this.name,
+          jobId: job.id,
+          jobName: job.name,
+          data: job.opts?.delay ? { delay: job.opts.delay } : undefined,
+        });
+      }
+
       return job;
     }
   }
