@@ -131,25 +131,27 @@ describe('JobGroup completion', () => {
     });
 
     let processedCount = 0;
-    const pauseWorker = new Promise<void>(resolve => {
+    // Resolve when job 3 starts — by that point jobs 1 and 2 have both completed
+    // and their group hooks have run (completedCount = 2). Block job 3 so the
+    // group doesn't reach COMPLETED while we assert.
+    const pauseAtThird = new Promise<void>(resolve => {
       const worker = new Worker(
         queueName,
         async () => {
           processedCount++;
-          if (processedCount === 2) {
+          if (processedCount === 3) {
             resolve();
-            // Pause processing to check intermediate state
-            await delay(5000);
+            await delay(5000); // Hold job 3 open so group stays ACTIVE
           }
           return 'done';
         },
-        { connection, prefix },
+        { connection, prefix, concurrency: 1 },
       );
       workers.push(worker);
     });
 
-    await pauseWorker;
-    await delay(500); // Let the second completion propagate
+    await pauseAtThird;
+    await delay(500); // Let the completedCount increments propagate
 
     const groupState = await queue.getGroupState(groupNode.groupId);
     expect(groupState!.state).toBe('ACTIVE');

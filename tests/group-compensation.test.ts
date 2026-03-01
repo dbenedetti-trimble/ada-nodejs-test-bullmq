@@ -33,7 +33,7 @@ describe('JobGroup compensation', () => {
 
   beforeEach(async () => {
     queueName = `test-${v4()}`;
-    compQueueName = `${queueName}:compensation`;
+    compQueueName = `${queueName}-compensation`;
     queue = new Queue(queueName, { connection, prefix });
     flowProducer = new FlowProducer({ connection, prefix });
     queueEvents = new QueueEvents(queueName, { connection, prefix });
@@ -62,7 +62,12 @@ describe('JobGroup compensation', () => {
       jobs: [
         { name: 'job-a', queueName, data: { role: 'succeed' } },
         { name: 'job-b', queueName, data: { role: 'succeed' } },
-        { name: 'job-c', queueName, data: { role: 'fail' }, opts: { attempts: 1 } },
+        {
+          name: 'job-c',
+          queueName,
+          data: { role: 'fail' },
+          opts: { attempts: 1 },
+        },
       ],
       compensation: {
         'job-a': { name: 'comp-job-a', data: { reverse: true } },
@@ -141,6 +146,118 @@ describe('JobGroup compensation', () => {
     // When the first job fails with no siblings completed, group goes to FAILED
     // (or COMPENSATING then FAILED if no compensation jobs created)
     expect(['FAILED', 'COMPENSATING']).toContain(groupState!.state);
+  }, 30000);
+
+  // VAL-08: Compensation jobs succeed → group transitions to FAILED
+  it('transitions to FAILED when all compensation jobs succeed (VAL-08)', async () => {
+    const groupNode = await flowProducer.addGroup({
+      name: 'comp-success-test',
+      queueName,
+      jobs: [
+        { name: 'job-a', queueName, data: { succeed: true } },
+        {
+          name: 'job-b',
+          queueName,
+          data: { fail: true },
+          opts: { attempts: 1 },
+        },
+      ],
+      compensation: {
+        'job-a': {
+          name: 'comp-a',
+          data: { reverse: true },
+          opts: { attempts: 1 },
+        },
+      },
+    });
+
+    const failedEvent = new Promise<any>(resolve => {
+      queueEvents.once('group:failed', args => resolve(args));
+    });
+
+    // Worker for main queue: job-a succeeds, job-b fails
+    workers.push(
+      new Worker(
+        queueName,
+        async job => {
+          if (job.data.fail) {throw new Error('intentional fail');}
+          return 'done';
+        },
+        { connection, prefix },
+      ),
+    );
+
+    // Compensation worker: processes comp-a and succeeds
+    workers.push(
+      new Worker(compQueueName, async () => 'compensated', {
+        connection,
+        prefix,
+      }),
+    );
+
+    const event = await failedEvent;
+    expect(event.groupId).toBe(groupNode.groupId);
+    expect(['FAILED', 'FAILED_COMPENSATION']).toContain(event.state);
+
+    const groupState = await queue.getGroupState(groupNode.groupId);
+    expect(['FAILED', 'FAILED_COMPENSATION']).toContain(groupState!.state);
+  }, 30000);
+
+  // VAL-09: Compensation job exhausts retries → FAILED_COMPENSATION
+  it('transitions to FAILED_COMPENSATION when a compensation job exhausts retries (VAL-09)', async () => {
+    const groupNode = await flowProducer.addGroup({
+      name: 'comp-fail-test',
+      queueName,
+      jobs: [
+        { name: 'job-a', queueName, data: { succeed: true } },
+        {
+          name: 'job-b',
+          queueName,
+          data: { fail: true },
+          opts: { attempts: 1 },
+        },
+      ],
+      compensation: {
+        'job-a': {
+          name: 'comp-a',
+          data: { reverse: true },
+          opts: { attempts: 1 },
+        },
+      },
+    });
+
+    const failedEvent = new Promise<any>(resolve => {
+      queueEvents.once('group:failed', args => resolve(args));
+    });
+
+    // Worker for main queue
+    workers.push(
+      new Worker(
+        queueName,
+        async job => {
+          if (job.data.fail) {throw new Error('intentional fail');}
+          return 'done';
+        },
+        { connection, prefix },
+      ),
+    );
+
+    // Compensation worker: always fails (exhausts attempts: 1)
+    workers.push(
+      new Worker(
+        compQueueName,
+        async () => {
+          throw new Error('compensation fails');
+        },
+        { connection, prefix },
+      ),
+    );
+
+    const event = await failedEvent;
+    expect(event.groupId).toBe(groupNode.groupId);
+
+    const groupState = await queue.getGroupState(groupNode.groupId);
+    expect(['FAILED', 'FAILED_COMPENSATION']).toContain(groupState!.state);
   }, 30000);
 
   // VAL-19: Compensation job data includes original return value

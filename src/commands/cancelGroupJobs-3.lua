@@ -26,8 +26,8 @@ if exists == 0 then
 end
 
 local state = redis.call("HGET", groupHashKey, "state")
--- Only cancel from ACTIVE state
-if state ~= "ACTIVE" then
+-- Allow cancellation from ACTIVE (manual cancel) or COMPENSATING (sibling failure triggered it)
+if state ~= "ACTIVE" and state ~= "COMPENSATING" then
   return {}
 end
 
@@ -78,23 +78,26 @@ end
 
 redis.call("HSET", groupHashKey, "updatedAt", timestamp)
 
-if completedCount > 0 then
-  redis.call("HSET", groupHashKey, "state", "COMPENSATING", "updatedAt", timestamp)
-  redis.call("XADD", eventsKey, "*",
-    "event", "group:compensating",
-    "groupId", groupId,
-    "groupName", groupName,
-    "failedJobId", "",
-    "reason", "group cancelled"
-  )
-else
-  redis.call("HSET", groupHashKey, "state", "FAILED", "updatedAt", timestamp)
-  redis.call("XADD", eventsKey, "*",
-    "event", "group:failed",
-    "groupId", groupId,
-    "groupName", groupName,
-    "state", "FAILED"
-  )
+-- Only perform state transition when coming from ACTIVE (not when already COMPENSATING)
+if state == "ACTIVE" then
+  if completedCount > 0 then
+    redis.call("HSET", groupHashKey, "state", "COMPENSATING", "updatedAt", timestamp)
+    redis.call("XADD", eventsKey, "*",
+      "event", "group:compensating",
+      "groupId", groupId,
+      "groupName", groupName,
+      "failedJobId", "",
+      "reason", "group cancelled"
+    )
+  else
+    redis.call("HSET", groupHashKey, "state", "FAILED", "updatedAt", timestamp)
+    redis.call("XADD", eventsKey, "*",
+      "event", "group:failed",
+      "groupId", groupId,
+      "groupName", groupName,
+      "state", "FAILED"
+    )
+  end
 end
 
 return completedJobKeys

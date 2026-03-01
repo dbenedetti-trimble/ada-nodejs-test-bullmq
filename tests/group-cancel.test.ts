@@ -74,20 +74,21 @@ describe('JobGroup cancellation', () => {
 
   // VAL-10: Cancel active group with completed + waiting jobs → COMPENSATING + compensation
   it('cancels waiting jobs and creates compensation for completed jobs (VAL-10)', async () => {
+    // job-b and job-c have a 30-second delay so they stay in the delayed ZSET
     const groupNode = await flowProducer.addGroup({
       name: 'cancel-with-completed',
       queueName,
       jobs: [
         { name: 'job-a', queueName, data: { succeed: true } },
-        { name: 'job-b', queueName, data: {} },
-        { name: 'job-c', queueName, data: {} },
+        { name: 'job-b', queueName, data: {}, opts: { delay: 30000 } },
+        { name: 'job-c', queueName, data: {}, opts: { delay: 30000 } },
       ],
       compensation: {
         'job-a': { name: 'comp-a', data: { reverse: true } },
       },
     });
 
-    // Process only job-a to completion
+    // Process only job-a (job-b and job-c are delayed so not immediately processable)
     let resolveAfterFirst: () => void;
     const firstDone = new Promise<void>(r => (resolveAfterFirst = r));
 
@@ -98,22 +99,22 @@ describe('JobGroup cancellation', () => {
           resolveAfterFirst!();
           return 'ok';
         }
-        await delay(30000); // block other jobs
+        return 'ok';
       },
-      { connection, prefix, concurrency: 1 },
+      { connection, prefix },
     );
     workers.push(worker);
 
     await firstDone;
-    await delay(500); // let completed propagate
+    await delay(500); // let job-a's moveToFinished + group hook propagate
     await worker.close();
     workers.pop();
 
-    // Now cancel the group while job-b and job-c are still waiting
+    // Now cancel the group — job-b and job-c are in the delayed ZSET
     await queue.cancelGroup(groupNode.groupId);
 
     const groupState = await queue.getGroupState(groupNode.groupId);
-    // job-a was completed, so we expect COMPENSATING state
+    // job-a completed so cancelGroup transitions to COMPENSATING (compensation for job-a)
     expect(['COMPENSATING', 'FAILED']).toContain(groupState!.state);
   }, 30000);
 
@@ -122,9 +123,7 @@ describe('JobGroup cancellation', () => {
     const groupNode = await flowProducer.addGroup({
       name: 'completed-group',
       queueName,
-      jobs: [
-        { name: 'job-a', queueName, data: {} },
-      ],
+      jobs: [{ name: 'job-a', queueName, data: {} }],
     });
 
     const completedEvent = new Promise<void>(resolve => {

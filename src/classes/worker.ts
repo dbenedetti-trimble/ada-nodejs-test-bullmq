@@ -1125,6 +1125,17 @@ will never work with more accuracy than 1ms. */
         }
       }
 
+      const compGroup = (job.opts as any)?.groupCompensation;
+      if (compGroup?.groupId) {
+        await this.scripts.updateGroupCompensation(
+          compGroup.groupId,
+          compGroup.ownerQueueName,
+          this.toKey(job.id),
+          'success',
+          Date.now(),
+        );
+      }
+
       span?.addEvent('job completed', {
         [TelemetryAttributes.JobResult]: JSON.stringify(result),
       });
@@ -1177,7 +1188,7 @@ will never work with more accuracy than 1ms. */
 
       this.emit('failed', job, err, 'active');
 
-      if (job.opts?.group?.id) {
+      if (job.opts?.group?.id && job.finishedOn) {
         const ownerQueueName = job.opts.group.queueName;
         const groupResult = await this.scripts.updateGroupOnFinished(
           job.opts.group.id,
@@ -1220,6 +1231,17 @@ will never work with more accuracy than 1ms. */
             );
           }
         }
+      }
+
+      const compGroup = (job.opts as any)?.groupCompensation;
+      if (compGroup?.groupId && job.finishedOn) {
+        await this.scripts.updateGroupCompensation(
+          compGroup.groupId,
+          compGroup.ownerQueueName,
+          this.toKey(job.id),
+          'failure',
+          Date.now(),
+        );
       }
 
       span?.addEvent('job failed', {

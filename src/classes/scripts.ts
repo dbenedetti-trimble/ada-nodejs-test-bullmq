@@ -1882,7 +1882,10 @@ export class Scripts {
     finalStatus: 'completed' | 'failed',
     returnValue: any,
     timestamp: number,
-  ): Promise<{ trigger?: 'compensation'; completedJobsForCompensation?: string[] } | null> {
+  ): Promise<{
+    trigger?: 'compensation';
+    completedJobsForCompensation?: string[];
+  } | null> {
     const client = await this.queue.client;
     const prefix = this.queue.opts.prefix || 'bull';
     const gk = new QueueKeys(prefix);
@@ -1901,10 +1904,11 @@ export class Scripts {
         : '';
     const argv = [jobKey, finalStatus, String(timestamp), returnValueStr];
 
-    const result: any = await this.execCommand(client, 'updateGroupOnFinished', [
-      ...keys,
-      ...argv,
-    ]);
+    const result: any = await this.execCommand(
+      client,
+      'updateGroupOnFinished',
+      [...keys, ...argv],
+    );
 
     if (!result) {
       return null;
@@ -1959,7 +1963,6 @@ export class Scripts {
     ownerQueueName: string,
     completedJobKeys: string[],
     compensationMap: Record<string, any>,
-    compensationJobReturnValues: Record<string, string> = {},
   ): Promise<void> {
     if (completedJobKeys.length === 0) {
       return;
@@ -1969,59 +1972,67 @@ export class Scripts {
     const prefix = this.queue.opts.prefix || 'bull';
     const gk = new QueueKeys(prefix);
 
-    // Group compensation jobs by their compensation queue (source queue + :compensation)
+    // Group compensation jobs by their compensation queue (source queue + :compensation).
     // completedJobKey format: {prefix}:{jobQueueName}:{jobId}
+    // We fetch each job's name from its Redis hash to look up the correct compensation entry.
     const byCompQueue: Map<string, any[]> = new Map();
 
     for (const jobKey of completedJobKeys) {
-      // Parse jobKey: {prefix}:{queueName}:{jobId}
       const parts = jobKey.split(':');
       if (parts.length < 3) {
         continue;
       }
-      // jobId is the last segment, queueName is the middle part(s)
       const jobId = parts[parts.length - 1];
       const jobQueueName = parts.slice(1, parts.length - 1).join(':');
-      const compQueueName = `${jobQueueName}:compensation`;
+      const compQueueName = `${jobQueueName}-compensation`;
 
-      // Match compensation definition by jobId or jobName
-      // We need the job name to look up the compensation map.
-      // For simplicity, store jobId-indexed return values and find by scanning
-      // The compensation map is keyed by job NAME (from GroupJobDefinition.name)
-      // We don't have the name here, so we'll pass ALL compensations and let
-      // the TypeScript caller filter by name. For now, we pass all compensation entries
-      // associated with this queue.
+      // Fetch the job name and return value from Redis to match the compensation map entry
+      const [jobName, returnValueRaw] = await client.hmget(
+        jobKey,
+        'name',
+        'returnvalue',
+      );
+
+      if (!jobName || !compensationMap[jobName]) {
+        continue;
+      }
+
+      const compDef = compensationMap[jobName];
+      let originalReturnValue: any = null;
+      try {
+        originalReturnValue = returnValueRaw
+          ? JSON.parse(returnValueRaw)
+          : null;
+      } catch {
+        originalReturnValue = null;
+      }
+
+      const compJobData = {
+        groupId,
+        originalJobName: jobName,
+        originalJobId: jobId,
+        originalReturnValue,
+        compensationData: compDef.data,
+      };
+
+      const defaultOpts = {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 1000 },
+        ...compDef.opts,
+        groupCompensation: { groupId, ownerQueueName },
+      };
 
       if (!byCompQueue.has(compQueueName)) {
         byCompQueue.set(compQueueName, []);
       }
-
-      const returnValueJson = compensationJobReturnValues[jobId] || '{}';
-
-      // Find all compensation entries for this job (by checking all keys)
-      // The compensationMap keys are job names. We match via the jobId stored
-      // in compensationJobReturnValues which maps jobId -> returnValue.
-      for (const [jobName, compDef] of Object.entries(compensationMap)) {
-        const compJobData = {
-          groupId,
-          originalJobName: jobName,
-          originalJobId: jobId,
-          originalReturnValue: JSON.parse(returnValueJson),
-          compensationData: compDef.data,
-        };
-        const defaultOpts = {
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 1000 },
-          ...compDef.opts,
-        };
-        byCompQueue.get(compQueueName)!.push([
+      byCompQueue
+        .get(compQueueName)!
+        .push([
           compDef.name,
           JSON.stringify(compJobData),
           JSON.stringify(defaultOpts),
           String(Date.now()),
         ]);
-        break; // only first match per jobKey
-      }
     }
 
     const ownerGroupHashKey = gk.toGroupKey(ownerQueueName, groupId);
@@ -2045,7 +2056,11 @@ export class Scripts {
 
     // Store totalCompensationJobs in the group hash so updateGroupCompensation knows when done
     if (totalCompJobs > 0) {
-      await client.hset(ownerGroupHashKey, 'totalCompensationJobs', totalCompJobs);
+      await client.hset(
+        ownerGroupHashKey,
+        'totalCompensationJobs',
+        totalCompJobs,
+      );
     }
   }
 
@@ -2092,10 +2107,11 @@ export class Scripts {
     const keys = [gk.toGroupKey(ownerQueueName, groupId), ownerEventsKey];
     const argv = [compensationJobKey, outcome, String(timestamp), groupId];
 
-    const result: any = await this.execCommand(client, 'updateGroupCompensation', [
-      ...keys,
-      ...argv,
-    ]);
+    const result: any = await this.execCommand(
+      client,
+      'updateGroupCompensation',
+      [...keys, ...argv],
+    );
 
     return result ? String(result) : null;
   }
