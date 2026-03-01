@@ -879,7 +879,7 @@ export class Job<
             );
 
             try {
-              result = await this.scripts.moveToDeadLetter(this.id, args);
+              await this.scripts.moveToDeadLetter(this.id, args);
               finishedOn = Date.now();
               this.deadLettered = true;
             } catch (dlqErr) {
