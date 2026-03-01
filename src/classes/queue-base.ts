@@ -4,6 +4,7 @@ import {
   QueueBaseOptions,
   RedisClient,
   Span,
+  LifecycleEvent,
 } from '../interfaces';
 
 import {
@@ -190,6 +191,25 @@ export class QueueBase extends EventEmitter implements MinimalQueue {
         return;
       }
     }
+  }
+
+  /**
+   * Returns true if the given lifecycle event should be logged.
+   *
+   * When no logger is configured this returns false immediately (zero overhead path).
+   * When a logger is set and no `logEvents` filter is configured, all events are logged.
+   * When `logEvents` is set, only the listed events produce log calls.
+   *
+   * @param event - the lifecycle event to check
+   */
+  protected shouldLog(event: LifecycleEvent): boolean {
+    if (!this.opts.logger) {
+      return false;
+    }
+    if (!this.opts.logEvents) {
+      return true;
+    }
+    return this.opts.logEvents.includes(event);
   }
 
   /**

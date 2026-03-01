@@ -36,8 +36,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -385,6 +386,17 @@ export class Queue<
         },
       );
       this.emit('waiting', job as JobBase<DataType, ResultType, NameType>);
+
+      if (this.shouldLog('job:added')) {
+        this.opts.logger!.debug({
+          timestamp: Date.now(),
+          event: 'job:added',
+          queue: this.name,
+          jobId: job.id,
+          jobName: job.name,
+          ...(job.opts.delay ? { data: { delay: job.opts.delay } } : {}),
+        });
+      }
 
       return job;
     }

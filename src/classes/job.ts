@@ -858,6 +858,23 @@ export class Job<
 
             this.recordJobMetrics('retried');
           }
+
+          const _retryLogger = this.queue.opts?.logger;
+          if (
+            _retryLogger &&
+            (!this.queue.opts?.logEvents ||
+              this.queue.opts.logEvents.includes('job:retrying'))
+          ) {
+            _retryLogger.warn({
+              timestamp: Date.now(),
+              event: 'job:retrying',
+              queue: this.queue.name,
+              jobId: this.id,
+              jobName: this.name,
+              attemptsMade: this.attemptsMade,
+              data: { delay: retryDelay, maxAttempts: this.opts.attempts },
+            });
+          }
         } else {
           const args = this.scripts.moveToFailedArgs(
             this,
@@ -1424,6 +1441,22 @@ export class Job<
     this.delay = finalDelay;
 
     this.recordJobMetrics('delayed');
+
+    const _delayLogger = this.queue.opts?.logger;
+    if (
+      _delayLogger &&
+      (!this.queue.opts?.logEvents ||
+        this.queue.opts.logEvents.includes('job:delayed'))
+    ) {
+      _delayLogger.debug({
+        timestamp: Date.now(),
+        event: 'job:delayed',
+        queue: this.queue.name,
+        jobId: this.id,
+        jobName: this.name,
+        data: { delay: finalDelay },
+      });
+    }
 
     return movedToDelayed;
   }
