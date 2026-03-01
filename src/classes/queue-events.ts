@@ -159,6 +159,22 @@ export interface QueueEventsListener extends IoredisListener {
   ) => void;
 
   /**
+   * Listen to 'deadLettered' event.
+   *
+   * This event is triggered when a terminally failed job is moved to the dead letter queue.
+   * Emitted by the moveToDeadLetter Lua script via XADD on the source queue's events stream.
+   *
+   * @param args - An object containing details about the dead-lettered job.
+   *  - `jobId` - The unique identifier of the job that was moved to the DLQ.
+   *  - `deadLetterQueue` - The name of the dead letter queue the job was moved to.
+   * @param id - The identifier of the event.
+   */
+  deadLettered: (
+    args: { jobId: string; deadLetterQueue: string },
+    id: string,
+  ) => void;
+
+  /**
    * Listen to 'paused' event.
    *
    * This event is triggered when the queue is paused, halting the processing of new jobs.

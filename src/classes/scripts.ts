@@ -1830,6 +1830,170 @@ export class Scripts {
     (error as any).code = code;
     return error;
   }
+
+  // ---------------------------------------------------------------------------
+  // Dead Letter Queue methods
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Build the KEYS + ARGV array for the moveToDeadLetter Lua command.
+   * KEYS (7): source active, source job hash, source events, DLQ wait,
+   *           DLQ job hash, DLQ events, DLQ meta
+   * ARGV (6): source jobId, DLQ queue name, DLQ job ID (UUID), packed metadata,
+   *           timestamp, removeOnFail flag ('1' | '')
+   */
+  moveToDeadLetterArgs(
+    job: MinimalJob,
+    dlqQueueName: string,
+    dlqJobId: string,
+    removeOnFail: boolean | number | KeepJobs,
+    _token: string,
+    _fetchNext: boolean,
+    _fieldsToUpdate?: Record<string, any>,
+  ): (string | number | boolean | Buffer)[] {
+    const queueKeys = this.queue.keys;
+    const prefix = this.queue.opts.prefix || 'bull';
+    const dlqBase = `${prefix}:${dlqQueueName}`;
+    const timestamp = Date.now();
+
+    const shouldRemove =
+      typeof removeOnFail === 'boolean'
+        ? removeOnFail
+        : typeof removeOnFail === 'number'
+          ? removeOnFail === 0
+          : removeOnFail?.count === 0;
+
+    const meta = {
+      sourceQueue: job.queueName || '',
+      originalJobId: job.id || '',
+      failedReason: job.failedReason || '',
+      stacktrace: job.stacktrace || [],
+      attemptsMade: (job.attemptsMade ?? 0) + 1,
+      deadLetteredAt: timestamp,
+      originalTimestamp: job.timestamp ?? 0,
+      originalOpts: job.opts || {},
+    };
+
+    const keys: string[] = [
+      queueKeys.active,
+      this.queue.toKey(job.id ?? ''),
+      queueKeys.events,
+      `${dlqBase}:wait`,
+      `${dlqBase}:${dlqJobId}`,
+      `${dlqBase}:events`,
+      `${dlqBase}:meta`,
+    ];
+
+    const args: (string | number | boolean | Buffer)[] = [
+      job.id ?? '',
+      dlqQueueName,
+      dlqJobId,
+      pack(meta),
+      timestamp,
+      shouldRemove ? '1' : '',
+    ];
+
+    return (keys as any[]).concat(args);
+  }
+
+  /**
+   * Move a terminally failed job from source active list to the DLQ wait list.
+   * Returns the new DLQ job ID on success, or throws on error.
+   */
+  async moveToDeadLetter(
+    jobId: string,
+    args: (string | number | boolean | Buffer)[],
+  ): Promise<string> {
+    const client = await this.queue.client;
+    const result = await this.execCommand(client, 'moveToDeadLetter', args);
+    if (typeof result === 'number' && result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId,
+        command: 'moveToDeadLetter',
+        state: 'active',
+      });
+    }
+    return result as string;
+  }
+
+  /**
+   * Atomically replay a DLQ job back to its original source queue.
+   * Returns the new source job ID.
+   */
+  async replayFromDeadLetter(
+    dlqJobId: string,
+    dlqQueueName: string,
+    sourceQueueName: string,
+    newJobId: string,
+    prefix: string,
+  ): Promise<string> {
+    const client = await this.queue.client;
+    const dlqBase = `${prefix}:${dlqQueueName}`;
+    const srcBase = `${prefix}:${sourceQueueName}`;
+    const timestamp = Date.now();
+
+    const keys: string[] = [
+      `${dlqBase}:${dlqJobId}`,
+      `${dlqBase}:wait`,
+      `${srcBase}:wait`,
+      `${srcBase}:${newJobId}`,
+    ];
+
+    const args: (string | number)[] = [
+      dlqJobId,
+      newJobId,
+      sourceQueueName,
+      timestamp,
+    ];
+
+    const result = await this.execCommand(
+      client,
+      'replayFromDeadLetter',
+      (keys as any[]).concat(args),
+    );
+
+    if (typeof result === 'number' && result < 0) {
+      if (result === -1) {
+        throw new Error(`replayFromDeadLetter: DLQ job ${dlqJobId} not found`);
+      }
+      if (result === -2) {
+        throw new Error(
+          `replayFromDeadLetter: _dlqMeta.sourceQueue missing on job ${dlqJobId}`,
+        );
+      }
+      throw new Error(
+        `replayFromDeadLetter: unexpected error code ${result} for job ${dlqJobId}`,
+      );
+    }
+    return result as string;
+  }
+
+  /**
+   * Bulk remove DLQ jobs with optional filter.
+   * Returns the count of removed jobs.
+   */
+  async purgeDeadLetters(
+    dlqQueueName: string,
+    prefix: string,
+    filter?: { name?: string; failedReason?: string },
+  ): Promise<number> {
+    const client = await this.queue.client;
+    const dlqBase = `${prefix}:${dlqQueueName}`;
+
+    const keys: string[] = [`${dlqBase}:wait`, `${dlqBase}:meta`];
+
+    const packedFilter =
+      filter && Object.keys(filter).length > 0 ? pack(filter) : '';
+
+    const result = await this.execCommand(
+      client,
+      'purgeDeadLetters',
+      (keys as any[]).concat([packedFilter]),
+    );
+
+    return result as number;
+  }
 }
 
 export function raw2NextJobData(raw: any[]) {

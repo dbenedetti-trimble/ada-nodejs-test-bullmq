@@ -35,6 +35,7 @@ import {
   tryCatch,
   removeUndefinedFields,
 } from '../utils';
+import { v4 } from 'uuid';
 import { createScripts } from '../utils/create-scripts';
 import { Backoffs } from './backoffs';
 import { Scripts } from './scripts';
@@ -136,6 +137,11 @@ export class Job<
    * Timestamp for when the job finished (completed or failed).
    */
   finishedOn?: number;
+
+  /**
+   * True when this job was routed to a dead letter queue on terminal failure.
+   */
+  deadLettered = false;
 
   /**
    * Timestamp for when the job was processed.
@@ -859,19 +865,54 @@ export class Job<
             this.recordJobMetrics('retried');
           }
         } else {
-          const args = this.scripts.moveToFailedArgs(
-            this,
-            this.failedReason,
-            this.opts.removeOnFail,
-            token,
-            fetchNext,
-            fieldsToUpdate,
-          );
+          const workerOpts = this.queue.opts as WorkerOptions;
+          if (workerOpts?.deadLetterQueue) {
+            const dlqJobId = v4();
+            const args = this.scripts.moveToDeadLetterArgs(
+              this,
+              workerOpts.deadLetterQueue.queueName,
+              dlqJobId,
+              this.opts.removeOnFail,
+              token,
+              fetchNext,
+              fieldsToUpdate,
+            );
 
-          result = await this.scripts.moveToFinished(this.id, args);
-          finishedOn = args[
-            this.scripts.moveToFinishedKeys.length + 1
-          ] as number;
+            try {
+              await this.scripts.moveToDeadLetter(this.id, args);
+              finishedOn = Date.now();
+              this.deadLettered = true;
+            } catch (dlqErr) {
+              // DLQ routing failed; fall back to normal failed set to prevent job loss
+              const failedArgs = this.scripts.moveToFailedArgs(
+                this,
+                this.failedReason,
+                this.opts.removeOnFail,
+                token,
+                fetchNext,
+                fieldsToUpdate,
+              );
+
+              result = await this.scripts.moveToFinished(this.id, failedArgs);
+              finishedOn = failedArgs[
+                this.scripts.moveToFinishedKeys.length + 1
+              ] as number;
+            }
+          } else {
+            const args = this.scripts.moveToFailedArgs(
+              this,
+              this.failedReason,
+              this.opts.removeOnFail,
+              token,
+              fetchNext,
+              fieldsToUpdate,
+            );
+
+            result = await this.scripts.moveToFinished(this.id, args);
+            finishedOn = args[
+              this.scripts.moveToFinishedKeys.length + 1
+            ] as number;
+          }
 
           // Only record failed metrics when job is not retrying
           this.recordJobMetrics('failed');

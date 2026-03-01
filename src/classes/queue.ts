@@ -2,6 +2,7 @@ import { v4 } from 'uuid';
 import {
   BaseJobOptions,
   BulkJobOptions,
+  DeadLetterFilter,
   IoredisListener,
   JobSchedulerJson,
   MinimalQueue,
@@ -36,8 +37,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -1055,5 +1057,122 @@ export class Queue<
   async removeDeprecatedPriorityKey(): Promise<number> {
     const client = await this.client;
     return client.del(this.toKey('priority'));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dead Letter Queue inspection and replay API
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns the number of jobs currently in this queue's waiting state (DLQ jobs land here).
+   */
+  async getDeadLetterCount(): Promise<number> {
+    return this.getWaitingCount();
+  }
+
+  /**
+   * Returns a paginated list of DLQ jobs ordered by arrival (newest first).
+   * @param start - zero-based start index
+   * @param end   - zero-based end index (inclusive)
+   */
+  async getDeadLetterJobs(start: number, end: number): Promise<Job[]> {
+    return this.getWaiting(start, end);
+  }
+
+  /**
+   * Returns a single DLQ job by ID, or undefined if not found.
+   */
+  async peekDeadLetter(jobId: string): Promise<Job | undefined> {
+    return this.getJob(jobId);
+  }
+
+  /**
+   * Atomically replays a single DLQ job back to its original source queue.
+   * Returns the new source job ID.
+   */
+  async replayDeadLetter(jobId: string): Promise<string> {
+    const dlqJob = await this.getJob(jobId);
+    if (!dlqJob) {
+      throw new Error(`replayDeadLetter: job ${jobId} not found in DLQ`);
+    }
+
+    const dlqMeta = (dlqJob.data as any)?._dlqMeta;
+    if (!dlqMeta?.sourceQueue) {
+      throw new Error(
+        `replayDeadLetter: job ${jobId} is missing _dlqMeta.sourceQueue`,
+      );
+    }
+
+    const prefix = this.opts.prefix || 'bull';
+    const newJobId = v4();
+
+    return this.scripts.replayFromDeadLetter(
+      jobId,
+      this.name,
+      dlqMeta.sourceQueue as string,
+      newJobId,
+      prefix,
+    );
+  }
+
+  /**
+   * Replays all (or filtered) DLQ jobs back to their original source queues.
+   * Returns the count of replayed jobs. Processes jobs in batches to avoid
+   * loading the entire DLQ into memory.
+   */
+  async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    const batchSize = 100;
+    let count = 0;
+    let offset = 0;
+
+    while (true) {
+      const jobs = await this.getWaiting(offset, offset + batchSize - 1);
+      if (jobs.length === 0) {
+        break;
+      }
+
+      let skipped = 0;
+      for (const job of jobs) {
+        const dlqMeta = (job.data as any)?._dlqMeta;
+        if (!dlqMeta) {
+          skipped++;
+          continue;
+        }
+
+        if (filter?.name !== undefined && job.name !== filter.name) {
+          skipped++;
+          continue;
+        }
+
+        if (filter?.failedReason !== undefined) {
+          const reason: string = (dlqMeta.failedReason || '').toLowerCase();
+          if (!reason.includes(filter.failedReason.toLowerCase())) {
+            skipped++;
+            continue;
+          }
+        }
+
+        await this.replayDeadLetter(job.id!);
+        count++;
+      }
+
+      // Advance offset past the non-matching (skipped) jobs that remain in place.
+      // Matched jobs were removed, so the effective list shifted by the number replayed.
+      offset += skipped;
+
+      if (jobs.length < batchSize) {
+        break;
+      }
+    }
+
+    return count;
+  }
+
+  /**
+   * Removes all (or filtered) DLQ jobs. Returns the count of removed jobs.
+   */
+  async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    const prefix = this.opts.prefix || 'bull';
+    return this.scripts.purgeDeadLetters(this.name, prefix, filter);
   }
 }

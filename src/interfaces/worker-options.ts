@@ -5,6 +5,7 @@ import { MetricsOptions } from './metrics-options';
 import { KeepJobs } from '../types/keep-jobs';
 import { Telemetry } from './telemetry';
 import { SandboxedOptions } from './sandboxed-options';
+import { DeadLetterQueueOptions } from './dead-letter-options';
 
 export interface WorkerOptions extends QueueBaseOptions, SandboxedOptions {
   /**
@@ -157,6 +158,17 @@ export interface WorkerOptions extends QueueBaseOptions, SandboxedOptions {
    * Telemetry Addon
    */
   telemetry?: Telemetry;
+
+  /**
+   * When set, terminal failures (retries exhausted or UnrecoverableError) route the job
+   * to the specified dead letter queue instead of the 'failed' set.
+   *
+   * In Redis Cluster mode, the DLQ queue name must use the same hash tag as the
+   * source queue (e.g. source: `{payments}`, DLQ: `{payments}-dlq`) to ensure all
+   * Lua script keys hash to the same slot. Without a matching hash tag, DLQ operations
+   * will throw a CROSSSLOT error in cluster mode.
+   */
+  deadLetterQueue?: DeadLetterQueueOptions;
 }
 
 export interface GetNextJobOptions {
