@@ -113,6 +113,10 @@ export class Backoffs {
       const strategy = lookupStrategy(backoff, customStrategy);
       const result = strategy(attemptsMade, backoff.type, err, job);
 
+      if (backoff.maxDelay !== undefined && backoff.maxDelay < 0) {
+        throw new Error('maxDelay must be a positive number or 0');
+      }
+
       if (backoff.maxDelay && backoff.maxDelay > 0) {
         if (result instanceof Promise) {
           return result.then(d => Math.min(d, backoff.maxDelay!));

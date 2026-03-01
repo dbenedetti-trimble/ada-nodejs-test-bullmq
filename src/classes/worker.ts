@@ -310,7 +310,8 @@ export class Worker<
       if (
         cb.halfOpenMaxAttempts !== undefined &&
         (typeof cb.halfOpenMaxAttempts !== 'number' ||
-          cb.halfOpenMaxAttempts <= 0)
+          cb.halfOpenMaxAttempts <= 0 ||
+          !Number.isInteger(cb.halfOpenMaxAttempts))
       ) {
         throw new Error(
           'circuitBreaker.halfOpenMaxAttempts must be a positive integer',

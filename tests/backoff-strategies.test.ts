@@ -211,15 +211,23 @@ describe('Backoff strategies', () => {
     });
 
     for (let i = 1; i <= 10; i++) {
-      const raw = strategy(i, 'decorrelatedJitter', undefined, mockJob) as number;
+      const raw = strategy(
+        i,
+        'decorrelatedJitter',
+        undefined,
+        mockJob,
+      ) as number;
       const result = Math.min(raw, maxDelay);
-      expect(result).toBeGreaterThanOrEqual(0);
+      expect(result).toBeGreaterThanOrEqual(baseDelay);
       expect(result).toBeLessThanOrEqual(maxDelay);
     }
   });
 
   it('existing fixed and exponential strategies produce same delays as before', async () => {
-    const fixed = Backoffs.builtinStrategies['fixed']({ type: 'fixed', delay: 1000 });
+    const fixed = Backoffs.builtinStrategies['fixed']({
+      type: 'fixed',
+      delay: 1000,
+    });
     expect(fixed(1, 'fixed', undefined, undefined)).toBe(1000);
     expect(fixed(5, 'fixed', undefined, undefined)).toBe(1000);
 
