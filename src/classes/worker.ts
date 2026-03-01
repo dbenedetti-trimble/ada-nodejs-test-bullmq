@@ -255,6 +255,14 @@ export class Worker<
     }
 
     if (
+      this.opts.deadLetterQueue !== undefined &&
+      (typeof this.opts.deadLetterQueue.queueName !== 'string' ||
+        this.opts.deadLetterQueue.queueName.trim() === '')
+    ) {
+      throw new Error('deadLetterQueue.queueName must be a non-empty string');
+    }
+
+    if (
       typeof this.opts.stalledInterval !== 'number' ||
       this.opts.stalledInterval <= 0
     ) {

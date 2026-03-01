@@ -25,6 +25,7 @@ import {
   RetryJobOpts,
   RetryOptions,
   ScriptQueueContext,
+  DeadLetterFilter,
 } from '../interfaces';
 import {
   JobsOptions,
@@ -1754,6 +1755,49 @@ export class Scripts {
         jobs,
       };
     }
+  }
+
+  /**
+   * Atomically moves a terminally-failed job from the source queue's active list
+   * to the DLQ queue's waiting list.
+   *
+   * @stub Implemented in features pass.
+   */
+  async moveToDeadLetter(
+    job: MinimalJob,
+    failedReason: string,
+    token: string,
+    dlqQueueName: string,
+  ): Promise<string> {
+    // TODO(features): build KEYS/ARGS, call 'moveToDeadLetter' Lua script
+    throw new Error('moveToDeadLetter: not yet implemented');
+  }
+
+  /**
+   * Atomically replays a DLQ job back to its source queue's waiting list,
+   * removes it from the DLQ, and returns the new job ID in the source queue.
+   *
+   * @stub Implemented in features pass.
+   */
+  async replayFromDeadLetter(
+    dlqJobId: string,
+    dlqQueueName: string,
+  ): Promise<string> {
+    // TODO(features): build KEYS/ARGS, call 'replayFromDeadLetter' Lua script
+    throw new Error('replayFromDeadLetter: not yet implemented');
+  }
+
+  /**
+   * Bulk-removes DLQ jobs matching the given filter, returning the count removed.
+   *
+   * @stub Implemented in features pass.
+   */
+  async purgeDeadLetters(
+    dlqQueueName: string,
+    filter?: DeadLetterFilter,
+  ): Promise<number> {
+    // TODO(features): build KEYS/ARGS, call 'purgeDeadLetters' Lua script
+    throw new Error('purgeDeadLetters: not yet implemented');
   }
 
   finishedErrors({

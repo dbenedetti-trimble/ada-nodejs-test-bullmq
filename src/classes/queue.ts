@@ -2,6 +2,7 @@ import { v4 } from 'uuid';
 import {
   BaseJobOptions,
   BulkJobOptions,
+  DeadLetterFilter,
   IoredisListener,
   JobSchedulerJson,
   MinimalQueue,
@@ -1026,6 +1027,82 @@ export class Queue<
         } while (cursor);
       },
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dead Letter Queue — inspection & replay API
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns the number of jobs currently in this queue's waiting state.
+   * When used as a DLQ, all dead-lettered jobs land in the waiting list.
+   *
+   * @stub Implemented in features pass.
+   */
+  async getDeadLetterCount(): Promise<number> {
+    // TODO(features): delegate to getJobCounts(['waiting']) and return waiting count
+    throw new Error('getDeadLetterCount: not yet implemented');
+  }
+
+  /**
+   * Returns a paginated slice of jobs in this queue's waiting list,
+   * ordered newest-first (LRANGE on the wait key).
+   *
+   * @param start - Zero-based start index.
+   * @param end - Zero-based inclusive end index.
+   * @stub Implemented in features pass.
+   */
+  async getDeadLetterJobs(start: number, end: number): Promise<Job[]> {
+    // TODO(features): delegate to getJobs(['waiting'], start, end, false)
+    throw new Error('getDeadLetterJobs: not yet implemented');
+  }
+
+  /**
+   * Returns the job with the given ID, or `undefined` if it does not exist.
+   * When used as a DLQ, the returned job includes `data._dlqMeta`.
+   *
+   * @param jobId - The job ID to look up.
+   * @stub Implemented in features pass.
+   */
+  async peekDeadLetter(jobId: string): Promise<Job | undefined> {
+    // TODO(features): delegate to getJob(jobId)
+    throw new Error('peekDeadLetter: not yet implemented');
+  }
+
+  /**
+   * Replays a single DLQ job back to its original source queue,
+   * removes the job from the DLQ, and returns the new job ID.
+   *
+   * @param jobId - The DLQ job ID to replay.
+   * @stub Implemented in features pass.
+   */
+  async replayDeadLetter(jobId: string): Promise<string> {
+    // TODO(features): call scripts.replayFromDeadLetter(jobId, this.name)
+    throw new Error('replayDeadLetter: not yet implemented');
+  }
+
+  /**
+   * Replays all (or filtered) jobs from this DLQ back to their source queues.
+   * Returns the total count of jobs replayed.
+   *
+   * @param filter - Optional filter; if omitted, all jobs are replayed.
+   * @stub Implemented in features pass.
+   */
+  async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    // TODO(features): iterate waiting list, apply filter, call replayDeadLetter for each match
+    throw new Error('replayAllDeadLetters: not yet implemented');
+  }
+
+  /**
+   * Removes all (or filtered) jobs from this DLQ.
+   * Returns the total count of jobs removed.
+   *
+   * @param filter - Optional filter; if omitted, all jobs are removed.
+   * @stub Implemented in features pass.
+   */
+  async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    // TODO(features): call scripts.purgeDeadLetters(this.name, filter)
+    throw new Error('purgeDeadLetters: not yet implemented');
   }
 
   /**
