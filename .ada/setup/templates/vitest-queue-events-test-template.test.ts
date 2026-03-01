@@ -62,8 +62,8 @@ describe('[FEATURE_NAME] - Queue Events', () => {
 
   describe('job lifecycle events', () => {
     it('should emit waiting event when job is added', async () => {
-      const waiting = new Promise<{ jobId: string }>((resolve) => {
-        queueEvents.on('waiting', (event) => {
+      const waiting = new Promise<{ jobId: string }>(resolve => {
+        queueEvents.on('waiting', event => {
           resolve(event);
         });
       });
@@ -75,8 +75,8 @@ describe('[FEATURE_NAME] - Queue Events', () => {
     });
 
     it('should emit active event when job starts processing', async () => {
-      const active = new Promise<{ jobId: string }>((resolve) => {
-        queueEvents.on('active', (event) => {
+      const active = new Promise<{ jobId: string }>(resolve => {
+        queueEvents.on('active', event => {
           resolve(event);
         });
       });
@@ -100,11 +100,13 @@ describe('[FEATURE_NAME] - Queue Events', () => {
     });
 
     it('should emit completed event when job finishes', async () => {
-      const completed = new Promise<{ jobId: string; returnvalue: string }>((resolve) => {
-        queueEvents.on('completed', (event) => {
-          resolve(event);
-        });
-      });
+      const completed = new Promise<{ jobId: string; returnvalue: string }>(
+        resolve => {
+          queueEvents.on('completed', event => {
+            resolve(event);
+          });
+        },
+      );
 
       const worker = new Worker(
         queueName,
@@ -127,11 +129,13 @@ describe('[FEATURE_NAME] - Queue Events', () => {
     it('should emit failed event when job throws', async () => {
       const errorMessage = 'Intentional test failure';
 
-      const failed = new Promise<{ jobId: string; failedReason: string }>((resolve) => {
-        queueEvents.on('failed', (event) => {
-          resolve(event);
-        });
-      });
+      const failed = new Promise<{ jobId: string; failedReason: string }>(
+        resolve => {
+          queueEvents.on('failed', event => {
+            resolve(event);
+          });
+        },
+      );
 
       const worker = new Worker(
         queueName,
@@ -156,7 +160,7 @@ describe('[FEATURE_NAME] - Queue Events', () => {
     it('should emit progress event', async () => {
       const progressValues: number[] = [];
 
-      const allProgress = new Promise<void>((resolve) => {
+      const allProgress = new Promise<void>(resolve => {
         queueEvents.on('progress', ({ data }) => {
           progressValues.push(data as number);
           if (progressValues.length === 3) {
@@ -188,13 +192,17 @@ describe('[FEATURE_NAME] - Queue Events', () => {
 
   describe('delayed job events', () => {
     it('should emit delayed event for delayed jobs', async () => {
-      const delayed = new Promise<{ jobId: string }>((resolve) => {
-        queueEvents.on('delayed', (event) => {
+      const delayed = new Promise<{ jobId: string }>(resolve => {
+        queueEvents.on('delayed', event => {
           resolve(event);
         });
       });
 
-      const job = await queue.add('delayed-job', { data: 'test' }, { delay: 5000 });
+      const job = await queue.add(
+        'delayed-job',
+        { data: 'test' },
+        { delay: 5000 },
+      );
       const event = await delayed;
 
       expect(event.jobId).toBe(job.id);
@@ -205,7 +213,7 @@ describe('[FEATURE_NAME] - Queue Events', () => {
     it('should emit events in lifecycle order: waiting -> active -> completed', async () => {
       const events: string[] = [];
 
-      const completed = new Promise<void>((resolve) => {
+      const completed = new Promise<void>(resolve => {
         queueEvents.on('waiting', () => events.push('waiting'));
         queueEvents.on('active', () => events.push('active'));
         queueEvents.on('completed', () => {
@@ -214,11 +222,10 @@ describe('[FEATURE_NAME] - Queue Events', () => {
         });
       });
 
-      const worker = new Worker(
-        queueName,
-        async () => 'done',
-        { connection, prefix },
-      );
+      const worker = new Worker(queueName, async () => 'done', {
+        connection,
+        prefix,
+      });
       await worker.waitUntilReady();
 
       await queue.add('test', { data: 'test' });
