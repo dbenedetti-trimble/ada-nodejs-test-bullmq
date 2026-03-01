@@ -12,6 +12,10 @@ import {
   Tracer,
   ContextManager,
 } from '../interfaces';
+import {
+  GroupOptions,
+  GroupNode,
+} from '../interfaces/group-options';
 import { getParentKey, isRedisInstance, trace } from '../utils';
 import { Job } from './job';
 import { KeysMap, QueueKeys } from './queue-keys';
@@ -228,6 +232,52 @@ export class FlowProducer extends EventEmitter {
         return jobsTree;
       },
     );
+  }
+
+  /**
+   * Creates a transactional job group (saga) atomically in Redis.
+   *
+   * All jobs in the group are either all created or none are created.
+   * When any member job fails after exhausting retries, compensation jobs are
+   * automatically enqueued for already-completed sibling jobs.
+   *
+   * @param options - Group definition including name, jobs, and optional compensation mapping.
+   * @returns GroupNode containing the generated groupId and an array of created Job instances.
+   *
+   * TODO(features): implement full group creation with createGroup-4.lua pipeline
+   */
+  async addGroup(options: GroupOptions): Promise<GroupNode> {
+    if (this.closing) {
+      return;
+    }
+
+    const { name, jobs, compensation } = options;
+
+    if (!jobs || jobs.length === 0) {
+      throw new Error('Group must contain at least one job');
+    }
+
+    if (compensation) {
+      const jobNames = new Set(jobs.map(j => j.name));
+      for (const key of Object.keys(compensation)) {
+        if (!jobNames.has(key)) {
+          throw new Error(
+            `Compensation key "${key}" does not match any job name`,
+          );
+        }
+      }
+    }
+
+    for (const job of jobs) {
+      if (job.opts?.parent) {
+        throw new Error('A job cannot belong to both a group and a flow');
+      }
+    }
+
+    // TODO(features): generate groupId, build multi pipeline, call createGroup-4.lua,
+    // add each job with group metadata injected into opts, exec pipeline, and
+    // return GroupNode with all created Job instances.
+    throw new Error('addGroup not yet implemented');
   }
 
   /**

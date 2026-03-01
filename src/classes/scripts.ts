@@ -36,6 +36,11 @@ import {
   RedisJobOptions,
   JobProgress,
 } from '../types';
+import {
+  GroupStateData,
+  GroupJobEntry,
+} from '../interfaces/group-options';
+import { CompensationMapping } from '../interfaces/group-job';
 import { ErrorCode } from '../enums';
 import {
   array2obj,
@@ -1754,6 +1759,123 @@ export class Scripts {
         jobs,
       };
     }
+  }
+
+  /**
+   * Atomically creates a group metadata hash, adds to the groups index ZSET,
+   * and records per-job statuses as 'pending'.
+   * Called on a multi pipeline in addGroup().
+   *
+   * TODO(features): build KEYS and ARGV arrays and call execCommand('createGroup', ...)
+   */
+  async createGroup(
+    client: RedisClient | ChainableCommander,
+    queueName: string,
+    groupId: string,
+    groupName: string,
+    totalJobs: number,
+    compensationJson: string,
+    fullJobKeys: string[],
+  ): Promise<string> {
+    throw new Error('createGroup not yet implemented');
+  }
+
+  /**
+   * Post-moveToFinished hook: updates job status in group, checks for terminal/compensating
+   * state transition, and emits group events.
+   *
+   * TODO(features): build KEYS/ARGV and call execCommand('updateGroupOnFinished', ...)
+   * Returns a structured result with action and compensation data.
+   */
+  async updateGroupOnFinished(
+    client: RedisClient,
+    queueName: string,
+    groupId: string,
+    fullJobKey: string,
+    newStatus: 'completed' | 'failed',
+    returnValue?: string,
+  ): Promise<{
+    action: 'none' | 'cancel_and_compensate';
+    completedJobsForCompensation: Array<{
+      fullJobKey: string;
+      jobName: string;
+      returnValue: string;
+    }>;
+    groupState: string;
+  }> {
+    throw new Error('updateGroupOnFinished not yet implemented');
+  }
+
+  /**
+   * Cancels all pending/waiting/delayed/prioritized group jobs and updates group state.
+   *
+   * TODO(features): build KEYS/ARGV and call execCommand('cancelGroupJobs', ...)
+   */
+  async cancelGroupJobs(
+    client: RedisClient,
+    queueName: string,
+    groupId: string,
+  ): Promise<{
+    cancelled: number;
+    completedJobsForCompensation: Array<{
+      fullJobKey: string;
+      jobName: string;
+      returnValue: string;
+    }>;
+    error?: number;
+  }> {
+    throw new Error('cancelGroupJobs not yet implemented');
+  }
+
+  /**
+   * Enqueues compensation jobs into the compensation queue's wait list.
+   *
+   * TODO(features): build KEYS/ARGV and call execCommand('triggerCompensation', ...)
+   */
+  async triggerCompensation(
+    client: RedisClient,
+    compensationQueueName: string,
+    completedJobs: Array<{
+      fullJobKey: string;
+      jobName: string;
+      returnValue: string;
+    }>,
+    compensation: CompensationMapping,
+    groupId: string,
+  ): Promise<number> {
+    throw new Error('triggerCompensation not yet implemented');
+  }
+
+  /**
+   * Reads group metadata hash and returns a GroupStateData object, or null if not found.
+   *
+   * TODO(features): build KEYS/ARGV and call execCommand('getGroupState', ...)
+   */
+  async getGroupState(
+    client: RedisClient,
+    queueName: string,
+    groupId: string,
+  ): Promise<GroupStateData | null> {
+    throw new Error('getGroupState not yet implemented');
+  }
+
+  /**
+   * Tracks completion of a compensation job. Transitions group to FAILED or FAILED_COMPENSATION
+   * when all compensations are done.
+   *
+   * TODO(features): build KEYS/ARGV and call execCommand('updateGroupCompensation', ...)
+   */
+  async updateGroupCompensation(
+    client: RedisClient,
+    queueName: string,
+    groupId: string,
+    compensationJobKey: string,
+    finalStatus: 'completed' | 'failed',
+  ): Promise<{
+    groupState: string;
+    allDone: boolean;
+  }> {
+    throw new Error('updateGroupCompensation not yet implemented');
   }
 
   finishedErrors({

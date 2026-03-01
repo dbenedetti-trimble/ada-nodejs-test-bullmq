@@ -39,3 +39,6 @@ if ARGV[2] == "1" then
 end
 
 removeZSetJobs(KEYS[4], true, queueBaseKey, 0, scheduledJobs) -- prioritized
+
+-- TODO(features): drain does not remove group metadata (group state is separate from job queue sets).
+-- Only active/waiting/delayed job queue sets are drained; group hash cleanup happens on obliterate.

@@ -10,6 +10,11 @@ import {
   RepeatOptions,
 } from '../interfaces';
 import {
+  GroupJobEntry,
+  GroupStateData,
+} from '../interfaces/group-options';
+import { InvalidGroupStateError } from './errors/group-error';
+import {
   FinishedStatus,
   JobsOptions,
   JobSchedulerTemplateOptions,
@@ -1055,5 +1060,42 @@ export class Queue<
   async removeDeprecatedPriorityKey(): Promise<number> {
     const client = await this.client;
     return client.del(this.toKey('priority'));
+  }
+
+  /**
+   * Returns the current state metadata for a job group.
+   * Returns null if the group does not exist.
+   *
+   * @param groupId - The unique group identifier.
+   *
+   * TODO(features): delegate to Scripts.getGroupState() → getGroupState-1.lua
+   */
+  async getGroupState(groupId: string): Promise<GroupStateData | null> {
+    throw new Error('getGroupState not yet implemented');
+  }
+
+  /**
+   * Returns all member jobs of a group with their current status.
+   *
+   * @param groupId - The unique group identifier.
+   *
+   * TODO(features): delegate to Scripts and parse HGETALL result from group jobs hash
+   */
+  async getGroupJobs(groupId: string): Promise<GroupJobEntry[]> {
+    throw new Error('getGroupJobs not yet implemented');
+  }
+
+  /**
+   * Cancels an active group, removing pending jobs and triggering compensation
+   * for already-completed jobs.
+   *
+   * @param groupId - The unique group identifier.
+   * @throws {InvalidGroupStateError} if the group is already COMPLETED, COMPENSATING,
+   *   FAILED, or FAILED_COMPENSATION.
+   *
+   * TODO(features): call Scripts.cancelGroupJobs() then Scripts.triggerCompensation() if needed
+   */
+  async cancelGroup(groupId: string): Promise<void> {
+    throw new Error('cancelGroup not yet implemented');
   }
 }

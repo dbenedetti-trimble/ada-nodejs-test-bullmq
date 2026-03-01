@@ -248,6 +248,45 @@ export interface QueueEventsListener extends IoredisListener {
   waiting: (args: { jobId: string; prev?: string }, id: string) => void;
 
   /**
+   * Listen to 'group:completed' event.
+   *
+   * Emitted when all jobs in a group complete successfully.
+   */
+  'group:completed': (
+    args: { groupId: string; groupName: string },
+    id: string,
+  ) => void;
+
+  /**
+   * Listen to 'group:compensating' event.
+   *
+   * Emitted when a job in a group fails and compensation is triggered.
+   */
+  'group:compensating': (
+    args: {
+      groupId: string;
+      groupName: string;
+      failedJobId: string;
+      reason: string;
+    },
+    id: string,
+  ) => void;
+
+  /**
+   * Listen to 'group:failed' event.
+   *
+   * Emitted when a group reaches its terminal failure state (FAILED or FAILED_COMPENSATION).
+   */
+  'group:failed': (
+    args: {
+      groupId: string;
+      groupName: string;
+      state: 'FAILED' | 'FAILED_COMPENSATION';
+    },
+    id: string,
+  ) => void;
+
+  /**
    * Listen to 'waiting-children' event.
    *
    * This event is triggered when a job enters the 'waiting-children' state, indicating it is

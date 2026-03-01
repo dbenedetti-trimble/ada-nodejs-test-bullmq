@@ -1078,6 +1078,20 @@ will never work with more accuracy than 1ms. */
         token,
         fetchNextCallback() && !(this.closing || this.paused),
       );
+
+      // TODO(features): add group post-finish hook here
+      // if (job.opts.group?.id) {
+      //   const client = await this.client;
+      //   const groupResult = await this.scripts.updateGroupOnFinished(
+      //     client, job.queueName, job.opts.group.id, fullJobKey, 'completed', stringifiedResult);
+      //   if (groupResult.action === 'cancel_and_compensate') {
+      //     await this.scripts.cancelGroupJobs(client, job.queueName, job.opts.group.id);
+      //     if (groupResult.completedJobsForCompensation.length > 0) {
+      //       await this.scripts.triggerCompensation(client, ..., groupResult.completedJobsForCompensation, ...);
+      //     }
+      //   }
+      // }
+
       this.emit('completed', job, result, 'active');
 
       span?.addEvent('job completed', {
@@ -1129,6 +1143,19 @@ will never work with more accuracy than 1ms. */
         token,
         fetchNextCallback() && !(this.closing || this.paused),
       );
+
+      // TODO(features): add group post-finish hook here for failed jobs
+      // if (job.opts.group?.id && jobExhaustedRetries) {
+      //   const client = await this.client;
+      //   const groupResult = await this.scripts.updateGroupOnFinished(
+      //     client, job.queueName, job.opts.group.id, fullJobKey, 'failed');
+      //   if (groupResult.action === 'cancel_and_compensate') {
+      //     await this.scripts.cancelGroupJobs(client, job.queueName, job.opts.group.id);
+      //     if (groupResult.completedJobsForCompensation.length > 0) {
+      //       await this.scripts.triggerCompensation(client, ..., groupResult.completedJobsForCompensation, ...);
+      //     }
+      //   }
+      // }
 
       this.emit('failed', job, err, 'active');
 
