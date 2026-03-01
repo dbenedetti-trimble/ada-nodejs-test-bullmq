@@ -1088,11 +1088,154 @@ will never work with more accuracy than 1ms. */
         [TelemetryAttributes.JobAttemptsMade]: job.attemptsMade,
       });
 
+      await this.handleGroupOnFinished(job, 'completed', result);
+
       if (Array.isArray(completed)) {
         const [jobData, jobId, rateLimitDelay, delayUntil] = completed;
         this.updateDelays(rateLimitDelay, delayUntil);
 
         return this.nextJobFromJobData(jobData, jobId, token);
+      }
+    }
+  }
+
+  /**
+   * Post-moveToFinished hook for group-aware jobs.
+   *
+   * If the job belongs to a group (job.opts.group is set), calls
+   * updateGroupOnFinished-3.lua to update group state. If the script
+   * returns "trigger-compensation", cancels remaining group jobs and
+   * enqueues compensation jobs for already-completed siblings.
+   */
+  protected async handleGroupOnFinished(
+    job: Job<DataType, ResultType, NameType>,
+    status: 'completed' | 'failed',
+    returnValue?: ResultType,
+  ): Promise<void> {
+    if (!job.opts?.group) {
+      return;
+    }
+
+    const group = job.opts.group;
+
+    if (group.isCompensation) {
+      // Skip updateGroupCompensation while the compensation job still has retry
+      // attempts remaining — only process when all retries are exhausted.
+      const maxAttempts = job.opts?.attempts ?? 1;
+      if (status === 'failed' && job.attemptsMade < maxAttempts) {
+        return;
+      }
+      const client = await this.client;
+      const result = status === 'completed' ? 'success' : 'failure';
+      const jobPrefix = (this.opts as any).prefix || 'bull';
+      const jobKey = `${jobPrefix}:${this.name}:${job.id}`;
+      await this.scripts.updateGroupCompensation(
+        client,
+        group.id,
+        group.queueName,
+        jobKey,
+        result,
+        Date.now(),
+      );
+      return;
+    }
+
+    if (status === 'failed' && !job.finishedOn) {
+      return;
+    }
+
+    const client = await this.client;
+    const jobPrefix = (this.opts as any).prefix || 'bull';
+    const jobKey = `${jobPrefix}:${this.name}:${job.id}`;
+    const returnValueJson =
+      typeof returnValue !== 'undefined' ? JSON.stringify(returnValue) : 'null';
+
+    const [action, completedJobsJson] =
+      await this.scripts.updateGroupOnFinished(
+        client,
+        group.id,
+        group.queueName,
+        jobKey,
+        status,
+        Date.now(),
+        returnValueJson,
+      );
+
+    if (action === 'trigger-compensation') {
+      const prefix = (this.opts as any).prefix || 'bull';
+      const groupHashKey = `${prefix}:${group.queueName}:groups:${group.id}`;
+      const compensationJson = await client.hget(groupHashKey, 'compensation');
+      const compensationMapping = JSON.parse(compensationJson || '{}');
+
+      type CompletedJobEntry = {
+        jobKey: string;
+        jobName: string;
+        returnValue: string;
+        jobId: string;
+      };
+      const parsedJobs = JSON.parse(completedJobsJson || '[]');
+      const completedJobs: CompletedJobEntry[] = Array.isArray(parsedJobs)
+        ? parsedJobs
+        : [];
+
+      await this.scripts.cancelGroupJobs(
+        client,
+        group.id,
+        group.queueName,
+        Date.now(),
+      );
+
+      const descriptors = completedJobs
+        .filter(j => compensationMapping[j.jobName])
+        .map(j => {
+          const compDef = compensationMapping[j.jobName];
+          return {
+            jobName: compDef.name,
+            groupId: group.id,
+            groupName: group.name,
+            ownerQueueName: group.queueName,
+            originalJobName: j.jobName,
+            originalJobId: j.jobId,
+            originalReturnValue: j.returnValue,
+            compensationData: compDef.data,
+            attempts: compDef.opts?.attempts ?? 3,
+            backoff: compDef.opts?.backoff,
+          };
+        });
+
+      if (descriptors.length > 0) {
+        const { Packr } = await import('msgpackr');
+        const packer = new Packr({
+          useRecords: false,
+          encodeUndefinedAsNil: true,
+        });
+        const packed = packer.pack(descriptors);
+        await this.scripts.triggerCompensation(
+          client,
+          `${group.queueName}-compensation`,
+          packed,
+          groupHashKey,
+        );
+      } else {
+        await (client as any).hset(
+          groupHashKey,
+          'state',
+          'FAILED',
+          'updatedAt',
+          Date.now(),
+        );
+        await (client as any).xadd(
+          `${prefix}:${group.queueName}:events`,
+          '*',
+          'event',
+          'group:failed',
+          'groupId',
+          group.id,
+          'groupName',
+          group.name,
+          'state',
+          'FAILED',
+        );
       }
     }
   }
@@ -1131,6 +1274,8 @@ will never work with more accuracy than 1ms. */
       );
 
       this.emit('failed', job, err, 'active');
+
+      await this.handleGroupOnFinished(job, 'failed');
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,

@@ -8,7 +8,10 @@ import {
   QueueOptions,
   RepeatableJob,
   RepeatOptions,
+  GroupStateResult,
+  GroupJobEntry,
 } from '../interfaces';
+import { GroupNotFoundError, InvalidGroupStateError } from './errors';
 import {
   FinishedStatus,
   JobsOptions,
@@ -36,8 +39,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -1055,5 +1059,250 @@ export class Queue<
   async removeDeprecatedPriorityKey(): Promise<number> {
     const client = await this.client;
     return client.del(this.toKey('priority'));
+  }
+
+  /**
+   * Returns the current state of a job group.
+   *
+   * @param groupId - The group identifier returned from addGroup()
+   * @returns GroupStateResult or null if the group does not exist
+   */
+  async getGroupState(groupId: string): Promise<GroupStateResult | null> {
+    const client = await this.client;
+    const raw = await this.scripts.getGroupState(client, groupId, this.name);
+    if (!raw || raw.length === 0) {
+      return null;
+    }
+    const map: Record<string, string> = {};
+    for (let i = 0; i < raw.length; i += 2) {
+      map[raw[i]] = raw[i + 1];
+    }
+    return {
+      id: map.id,
+      name: map.name,
+      state: map.state as GroupStateResult['state'],
+      createdAt: parseInt(map.createdAt, 10),
+      updatedAt: parseInt(map.updatedAt, 10),
+      totalJobs: parseInt(map.totalJobs, 10),
+      completedCount: parseInt(map.completedCount, 10),
+      failedCount: parseInt(map.failedCount, 10),
+      cancelledCount: parseInt(map.cancelledCount, 10),
+    };
+  }
+
+  /**
+   * Returns all member jobs of a group with their current statuses.
+   *
+   * @param groupId - The group identifier returned from addGroup()
+   * @returns Array of GroupJobEntry objects
+   */
+  async getGroupJobs(groupId: string): Promise<GroupJobEntry[]> {
+    const client = await this.client;
+    const prefix = (this.opts as any).prefix || 'bull';
+    const groupJobsKey = `${prefix}:${this.name}:groups:${groupId}:jobs`;
+    const raw = await client.hgetall(groupJobsKey);
+    if (!raw) {
+      return [];
+    }
+    return Object.entries(raw).map(([jobKey, rawStatus]) => {
+      const lastColon = jobKey.lastIndexOf(':');
+      const jobId = lastColon >= 0 ? jobKey.slice(lastColon + 1) : jobKey;
+      const base = lastColon >= 0 ? jobKey.slice(0, lastColon) : jobKey;
+      const secondColon = base.indexOf(':');
+      const queueName = secondColon >= 0 ? base.slice(secondColon + 1) : base;
+      // Normalize: "completed:<returnValueJson>" → "completed"
+      const status = rawStatus.startsWith('completed:')
+        ? 'completed'
+        : rawStatus;
+      return {
+        jobId,
+        jobKey,
+        status: status as GroupJobEntry['status'],
+        queueName,
+      };
+    });
+  }
+
+  /**
+   * Cancels an active group.
+   *
+   * Cancels all pending/waiting/delayed member jobs and triggers compensation
+   * for any already-completed jobs. Throws InvalidGroupStateError if the group
+   * is not in ACTIVE state.
+   *
+   * @param groupId - The group identifier returned from addGroup()
+   */
+  async cancelGroup(groupId: string): Promise<void> {
+    const groupState = await this.getGroupState(groupId);
+    if (!groupState) {
+      throw new GroupNotFoundError(groupId);
+    }
+    if (groupState.state !== 'ACTIVE') {
+      throw new InvalidGroupStateError(
+        groupId,
+        groupState.state,
+        'cancelGroup',
+      );
+    }
+
+    const client = await this.client;
+    const prefix = (this.opts as any).prefix || 'bull';
+    const timestamp = Date.now();
+
+    const [, completedCount] = await this.scripts.cancelGroupJobs(
+      client,
+      groupId,
+      this.name,
+      timestamp,
+    );
+
+    const groupHashKey = `${prefix}:${this.name}:groups:${groupId}`;
+    const groupName = groupState.name;
+
+    if (completedCount > 0) {
+      // Read raw group jobs hash to extract stored return values for completed jobs.
+      // Return values are embedded as "completed:<returnValueJson>" (set at completion time).
+      const groupJobsKey = `${prefix}:${this.name}:groups:${groupId}:jobs`;
+      const rawJobsHash = (await client.hgetall(groupJobsKey)) || {};
+
+      const completedJobsRaw = Object.entries(rawJobsHash)
+        .filter(([, rawStatus]) => rawStatus.startsWith('completed:'))
+        .map(([jobKey, rawStatus]) => {
+          const lastColon = jobKey.lastIndexOf(':');
+          const jobId = lastColon >= 0 ? jobKey.slice(lastColon + 1) : jobKey;
+          const base = lastColon >= 0 ? jobKey.slice(0, lastColon) : jobKey;
+          const secondColon = base.indexOf(':');
+          const queueName =
+            secondColon >= 0 ? base.slice(secondColon + 1) : base;
+          return {
+            jobKey,
+            jobId,
+            queueName,
+            returnValue: rawStatus.slice(10) || 'null',
+          };
+        });
+
+      const compensationJson = await client.hget(groupHashKey, 'compensation');
+      const compensationMapping = JSON.parse(compensationJson || '{}');
+
+      // Fetch each completed job's name from Redis to match against compensation mapping
+      const completedJobsWithNames = await Promise.all(
+        completedJobsRaw.map(async j => ({
+          ...j,
+          jobName: (await client.hget(j.jobKey, 'name')) || '',
+        })),
+      );
+
+      const { Packr } = await import('msgpackr');
+      const packer = new Packr({
+        useRecords: false,
+        encodeUndefinedAsNil: true,
+      });
+
+      // Group descriptors by compensation queue — per PRD, each job's compensation
+      // goes to its own queue's compensation queue (e.g., payments:compensation).
+      const descriptorsByQueue = new Map<string, object[]>();
+      for (const j of completedJobsWithNames) {
+        const compDef = compensationMapping[j.jobName];
+        if (compDef === undefined) {continue;}
+        const compQueueName = `${j.queueName}-compensation`;
+        const descriptor = {
+          jobName: compDef.name,
+          groupId,
+          groupName,
+          ownerQueueName: this.name,
+          originalJobName: j.jobName,
+          originalJobId: j.jobId,
+          originalReturnValue: j.returnValue,
+          compensationData: compDef?.data,
+          attempts: compDef?.opts?.attempts ?? 3,
+          backoff: compDef?.opts?.backoff,
+        };
+        if (!descriptorsByQueue.has(compQueueName)) {
+          descriptorsByQueue.set(compQueueName, []);
+        }
+        descriptorsByQueue.get(compQueueName)!.push(descriptor);
+      }
+
+      if (descriptorsByQueue.size > 0) {
+        const totalComps = Array.from(descriptorsByQueue.values()).reduce(
+          (s, a) => s + a.length,
+          0,
+        );
+        await client.hset(
+          groupHashKey,
+          'state',
+          'COMPENSATING',
+          'updatedAt',
+          timestamp,
+          'totalCompensations',
+          totalComps,
+        );
+        await client.xadd(
+          `${prefix}:${this.name}:events`,
+          '*',
+          'event',
+          'group:compensating',
+          'groupId',
+          groupId,
+          'groupName',
+          groupName,
+          'failedJobId',
+          '',
+          'reason',
+          'group cancelled',
+        );
+        for (const [compQueueName, descs] of descriptorsByQueue) {
+          const packed = packer.pack(descs);
+          // Pass empty groupHashKey — totalCompensations already set above
+          await this.scripts.triggerCompensation(
+            client,
+            compQueueName,
+            packed,
+            '',
+          );
+        }
+      } else {
+        await client.hset(
+          groupHashKey,
+          'state',
+          'FAILED',
+          'updatedAt',
+          timestamp,
+        );
+        await client.xadd(
+          `${prefix}:${this.name}:events`,
+          '*',
+          'event',
+          'group:failed',
+          'groupId',
+          groupId,
+          'groupName',
+          groupName,
+          'state',
+          'FAILED',
+        );
+      }
+    } else {
+      await client.hset(
+        groupHashKey,
+        'state',
+        'FAILED',
+        'updatedAt',
+        timestamp,
+      );
+      await client.xadd(
+        `${prefix}:${this.name}:events`,
+        '*',
+        'event',
+        'group:failed',
+        'groupId',
+        groupId,
+        'groupName',
+        groupName,
+        'state',
+        'FAILED',
+      );
+    }
   }
 }

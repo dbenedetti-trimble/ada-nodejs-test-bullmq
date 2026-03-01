@@ -1756,6 +1756,174 @@ export class Scripts {
     }
   }
 
+  /**
+   * Calls createGroup-4.lua to atomically set up group metadata in Redis.
+   *
+   * @param client - Redis pipeline or client
+   * @param groupId - Generated UUID for the group
+   * @param groupName - Human-readable group name
+   * @param timestamp - Creation timestamp (epoch ms)
+   * @param totalJobs - Number of member jobs
+   * @param compensationJson - JSON-encoded CompensationMapping
+   * @param jobKeys - Array of job key strings for member jobs
+   */
+  createGroup(
+    client: RedisClient | ChainableCommander,
+    groupId: string,
+    groupName: string,
+    timestamp: number,
+    totalJobs: number,
+    compensationJson: string,
+    jobKeys: string[],
+  ): Promise<string> | ChainableCommander {
+    const keys = [
+      this.queue.toKey(`groups:${groupId}`),
+      this.queue.toKey(`groups:${groupId}:jobs`),
+      this.queue.toKey('groups'),
+      this.queue.keys.events,
+    ];
+    const argv = [
+      groupId,
+      groupName,
+      timestamp,
+      totalJobs,
+      compensationJson,
+      ...jobKeys,
+    ];
+    return this.execCommand(client, 'createGroup', keys.concat(argv as any[]));
+  }
+
+  /**
+   * Calls updateGroupOnFinished-3.lua after a group member job finishes.
+   *
+   * @param client - Redis client
+   * @param groupId - The group the finished job belongs to
+   * @param ownerQueueName - The queue that owns the group (for key building)
+   * @param jobKey - The job's Redis key
+   * @param status - "completed" or "failed"
+   * @param timestamp - Current timestamp (epoch ms)
+   * @param returnValue - Serialized return value (when status=completed)
+   * @returns Action tuple: ["none"|"completed"|"trigger-compensation", completedJobsJson]
+   */
+  async updateGroupOnFinished(
+    client: RedisClient,
+    groupId: string,
+    ownerQueueName: string,
+    jobKey: string,
+    status: 'completed' | 'failed',
+    timestamp: number,
+    returnValue: string,
+  ): Promise<[string, string]> {
+    const prefix = (this.queue.opts as any).prefix || 'bull';
+    const base = `${prefix}:${ownerQueueName}`;
+    const keys = [
+      `${base}:groups:${groupId}`,
+      `${base}:groups:${groupId}:jobs`,
+      `${base}:events`,
+    ];
+    const argv = [jobKey, status, timestamp, returnValue];
+    return this.execCommand(client, 'updateGroupOnFinished', keys.concat(argv as any[]));
+  }
+
+  /**
+   * Calls cancelGroupJobs-3.lua to cancel pending group member jobs.
+   *
+   * @param client - Redis client
+   * @param groupId - The group to cancel jobs for
+   * @param ownerQueueName - The queue that owns the group
+   * @param timestamp - Current timestamp (epoch ms)
+   * @returns Number of jobs cancelled
+   */
+  async cancelGroupJobs(
+    client: RedisClient,
+    groupId: string,
+    ownerQueueName: string,
+    timestamp: number,
+  ): Promise<[number, number]> {
+    const prefix = (this.queue.opts as any).prefix || 'bull';
+    const base = `${prefix}:${ownerQueueName}`;
+    const keys = [
+      `${base}:groups:${groupId}`,
+      `${base}:groups:${groupId}:jobs`,
+      `${base}:events`,
+    ];
+    const argv = [timestamp, groupId];
+    return this.execCommand(client, 'cancelGroupJobs', keys.concat(argv as any[]));
+  }
+
+  /**
+   * Calls triggerCompensation-3.lua to enqueue compensation jobs.
+   *
+   * @param client - Redis client
+   * @param compensationQueueName - Name of compensation queue
+   * @param compensationJobs - Packed array of compensation job descriptors
+   * @returns Number of compensation jobs enqueued
+   */
+  async triggerCompensation(
+    client: RedisClient,
+    compensationQueueName: string,
+    compensationJobs: Buffer,
+    groupHashKey: string,
+  ): Promise<number> {
+    const prefix = (this.queue.opts as any).prefix || 'bull';
+    const base = `${prefix}:${compensationQueueName}`;
+    const keys = [
+      `${base}:wait`,
+      `${base}:meta`,
+      `${base}:events`,
+    ];
+    const argv: any[] = [compensationJobs, groupHashKey];
+    return this.execCommand(client, 'triggerCompensation', keys.concat(argv));
+  }
+
+  /**
+   * Calls getGroupState-1.lua to read group metadata.
+   *
+   * @param client - Redis client
+   * @param groupId - The group to query
+   * @param ownerQueueName - The queue that owns the group
+   * @returns Flat field-value array or null if not found
+   */
+  async getGroupState(
+    client: RedisClient,
+    groupId: string,
+    ownerQueueName: string,
+  ): Promise<string[] | null> {
+    const prefix = (this.queue.opts as any).prefix || 'bull';
+    const groupHashKey = `${prefix}:${ownerQueueName}:groups:${groupId}`;
+    const keys = [groupHashKey];
+    return this.execCommand(client, 'getGroupState', keys);
+  }
+
+  /**
+   * Calls updateGroupCompensation-2.lua to track compensation job completion.
+   *
+   * @param client - Redis client
+   * @param groupId - The group owning the compensation job
+   * @param ownerQueueName - The queue that owns the group
+   * @param compensationJobKey - Key of the finished compensation job
+   * @param result - "success" or "failure"
+   * @param timestamp - Current timestamp (epoch ms)
+   * @returns New group state or "pending" if compensation still in progress
+   */
+  async updateGroupCompensation(
+    client: RedisClient,
+    groupId: string,
+    ownerQueueName: string,
+    compensationJobKey: string,
+    result: 'success' | 'failure',
+    timestamp: number,
+  ): Promise<string> {
+    const prefix = (this.queue.opts as any).prefix || 'bull';
+    const base = `${prefix}:${ownerQueueName}`;
+    const keys = [
+      `${base}:groups:${groupId}`,
+      `${base}:events`,
+    ];
+    const argv = [compensationJobKey, result, timestamp];
+    return this.execCommand(client, 'updateGroupCompensation', keys.concat(argv as any[]));
+  }
+
   finishedErrors({
     code,
     jobId,

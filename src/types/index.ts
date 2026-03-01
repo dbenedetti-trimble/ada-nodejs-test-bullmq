@@ -1,4 +1,5 @@
 export * from './backoff-strategy';
+export * from './group-state';
 export * from './database-type';
 export * from './deduplication-options';
 export * from './finished-status';

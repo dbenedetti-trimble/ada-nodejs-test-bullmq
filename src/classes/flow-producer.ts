@@ -11,8 +11,10 @@ import {
   RedisClient,
   Tracer,
   ContextManager,
+  GroupOptions,
 } from '../interfaces';
 import { getParentKey, isRedisInstance, trace } from '../utils';
+import { Scripts } from './scripts';
 import { Job } from './job';
 import { KeysMap, QueueKeys } from './queue-keys';
 import { RedisConnection } from './redis-connection';
@@ -67,6 +69,12 @@ export interface NodeOpts {
 export interface JobNode {
   job: Job;
   children?: JobNode[];
+}
+
+export interface GroupNode {
+  groupId: string;
+  name: string;
+  jobs: Job[];
 }
 
 export interface FlowProducerListener extends IoredisListener {
@@ -552,6 +560,113 @@ export class FlowProducer extends EventEmitter {
       databaseType: this.connection.databaseType,
       trace: async (): Promise<any> => {},
     };
+  }
+
+  /**
+   * Creates a transactional job group implementing the saga compensation pattern.
+   *
+   * All jobs in the group either complete successfully (group → COMPLETED) or
+   * trigger compensation for already-completed jobs (group → COMPENSATING → FAILED).
+   *
+   * @param options - Group definition including name, member jobs, and compensation mapping
+   * @returns GroupNode containing the generated groupId and created Job instances
+   */
+  async addGroup(options: GroupOptions): Promise<GroupNode> {
+    if (!options.jobs || options.jobs.length === 0) {
+      throw new Error('Group must contain at least one job');
+    }
+
+    for (const jobDef of options.jobs) {
+      if ((jobDef.opts as any)?.parent) {
+        throw new Error(
+          `Group member job '${jobDef.name}' must not have opts.parent set`,
+        );
+      }
+    }
+
+    if (options.compensation) {
+      const jobNames = new Set(options.jobs.map(j => j.name));
+      for (const key of Object.keys(options.compensation)) {
+        if (!jobNames.has(key)) {
+          throw new Error(
+            `Compensation key '${key}' does not match any job name in the group`,
+          );
+        }
+      }
+    }
+
+    if (this.closing) {
+      return;
+    }
+
+    const client = await this.connection.client;
+    const multi = client.multi();
+
+    const groupId = v4();
+    const timestamp = Date.now();
+    const prefix = this.opts.prefix || 'bull';
+    const compensationJson = JSON.stringify(options.compensation || {});
+
+    const ownerQueueName = options.jobs[0].queueName;
+    const ownerQueueKeys = new QueueKeys(prefix);
+    const ownerQueue = this.queueFromNode(
+      { queueName: ownerQueueName },
+      ownerQueueKeys,
+      prefix,
+    );
+    const ownerScripts = new Scripts(ownerQueue as any);
+
+    const jobs: Job[] = [];
+    const jobKeys: string[] = [];
+
+    for (const jobDef of options.jobs) {
+      const jobId = jobDef.opts?.jobId || v4();
+      const jobQueueKeys = new QueueKeys(prefix);
+      const jobKey = `${prefix}:${jobDef.queueName}:${jobId}`;
+      jobKeys.push(jobKey);
+
+      const queue = this.queueFromNode(
+        { queueName: jobDef.queueName },
+        jobQueueKeys,
+        prefix,
+      );
+
+      const jobOpts = {
+        ...(jobDef.opts || {}),
+        group: {
+          id: groupId,
+          name: options.name,
+          queueName: ownerQueueName,
+        },
+      };
+
+      const job = new this.Job(
+        queue,
+        jobDef.name,
+        jobDef.data,
+        jobOpts,
+        jobId,
+      );
+      jobs.push(job);
+    }
+
+    ownerScripts.createGroup(
+      multi as unknown as RedisClient,
+      groupId,
+      options.name,
+      timestamp,
+      options.jobs.length,
+      compensationJson,
+      jobKeys,
+    );
+
+    for (const job of jobs) {
+      await job.addJob(<Redis>(multi as unknown), {});
+    }
+
+    await multi.exec();
+
+    return { groupId, name: options.name, jobs };
   }
 
   /**
