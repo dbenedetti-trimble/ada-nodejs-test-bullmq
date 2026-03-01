@@ -107,7 +107,34 @@ if newStatus == "failed" then
   local completedJobsJson = cjson.encode(completedJobsList)
 
   if #completedJobsList == 0 then
-    -- No completed siblings → go directly to FAILED
+    -- No completed siblings → cancel remaining pending/delayed/prioritized jobs and go to FAILED
+    local cancelledCount = 0
+    local allJobsData = rcall("HGETALL", KEYS[2])
+    for i = 1, #allJobsData, 2 do
+      local jKey = allJobsData[i]
+      local jStatus = allJobsData[i + 1]
+      if jStatus == "pending" then
+        -- Extract queueBase and jobId from fullJobKey ({prefix}:{queueName}:{jobId})
+        local lastColon = 0
+        for j = #jKey, 1, -1 do
+          if jKey:sub(j, j) == ":" then
+            lastColon = j
+            break
+          end
+        end
+        local queueBase = jKey:sub(1, lastColon - 1)
+        local jobId = jKey:sub(lastColon + 1)
+        rcall("LREM", queueBase .. ":wait", 0, jobId)
+        rcall("LREM", queueBase .. ":paused", 0, jobId)
+        rcall("ZREM", queueBase .. ":delayed", jobId)
+        rcall("ZREM", queueBase .. ":prioritized", jobId)
+        rcall("HSET", KEYS[2], jKey, "cancelled")
+        cancelledCount = cancelledCount + 1
+      end
+    end
+    if cancelledCount > 0 then
+      rcall("HINCRBY", KEYS[1], "cancelledCount", cancelledCount)
+    end
     rcall("HSET", KEYS[1], "state", "FAILED")
     rcall("XADD", KEYS[3], "MAXLEN", "~", maxEvents, "*",
       "event", "group:failed",

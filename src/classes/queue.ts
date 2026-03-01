@@ -1131,7 +1131,7 @@ export class Queue<
       const raw = await client.hget(groupHashKey, 'compensation');
       const compensation = raw ? JSON.parse(raw) : {};
 
-      const compensationQueueName = `${this.name}:compensation`;
+      const compensationQueueName = `${this.name}-compensation`;
       await this.scripts.triggerCompensation(
         client,
         compensationQueueName,

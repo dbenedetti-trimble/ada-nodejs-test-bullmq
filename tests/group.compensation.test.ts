@@ -29,7 +29,7 @@ describe('JobGroup - compensation', () => {
 
   beforeEach(async () => {
     queueName = `test-${v4()}`;
-    compQueueName = `${queueName}:compensation`;
+    compQueueName = `${queueName}-compensation`;
     queue = new Queue(queueName, { connection, prefix });
     flowProducer = new FlowProducer({ connection, prefix });
     queueEvents = new QueueEvents(queueName, { connection, prefix });

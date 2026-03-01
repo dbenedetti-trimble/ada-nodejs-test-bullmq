@@ -1108,7 +1108,7 @@ will never work with more accuracy than 1ms. */
               const compensation = compensationRaw
                 ? JSON.parse(compensationRaw)
                 : {};
-              const compensationQueueName = `${job.queueName}:compensation`;
+              const compensationQueueName = `${job.queueName}-compensation`;
               await this.scripts.triggerCompensation(
                 groupClient,
                 compensationQueueName,
@@ -1224,7 +1224,7 @@ will never work with more accuracy than 1ms. */
                 const compensation = compensationRaw
                   ? JSON.parse(compensationRaw)
                   : {};
-                const compensationQueueName = `${job.queueName}:compensation`;
+                const compensationQueueName = `${job.queueName}-compensation`;
                 await this.scripts.triggerCompensation(
                   groupClient,
                   compensationQueueName,
