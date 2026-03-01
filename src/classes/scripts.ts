@@ -1984,7 +1984,7 @@ export class Scripts {
       }
       const jobId = parts[parts.length - 1];
       const jobQueueName = parts.slice(1, parts.length - 1).join(':');
-      const compQueueName = `${jobQueueName}-compensation`;
+      const compQueueName = `${jobQueueName}:compensation`;
 
       // Fetch the job name and return value from Redis to match the compensation map entry
       const [jobName, returnValueRaw] = await client.hmget(
