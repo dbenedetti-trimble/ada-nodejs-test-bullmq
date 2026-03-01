@@ -9,6 +9,9 @@ import {
   RepeatableJob,
   RepeatOptions,
 } from '../interfaces';
+import { GroupJobEntry, GroupStateData } from '../interfaces/group-options';
+import { InvalidGroupStateError } from './errors/group-error';
+import { JobGroup as JobGroupClass } from './job-group';
 import {
   FinishedStatus,
   JobsOptions,
@@ -36,8 +39,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -1055,5 +1059,87 @@ export class Queue<
   async removeDeprecatedPriorityKey(): Promise<number> {
     const client = await this.client;
     return client.del(this.toKey('priority'));
+  }
+
+  /**
+   * Returns the current state metadata for a job group.
+   * Returns null if the group does not exist.
+   *
+   * @param groupId - The unique group identifier.
+   */
+  async getGroupState(groupId: string): Promise<GroupStateData | null> {
+    const client = await this.client;
+    return this.scripts.getGroupState(client, this.name, groupId);
+  }
+
+  /**
+   * Returns all member jobs of a group with their current status.
+   *
+   * @param groupId - The unique group identifier.
+   */
+  async getGroupJobs(groupId: string): Promise<GroupJobEntry[]> {
+    const client = await this.client;
+    const prefix = (this.opts as any)?.prefix || 'bull';
+    const groupJobsKey = `${prefix}:${this.name}:groups:${groupId}:jobs`;
+
+    const raw = await client.hgetall(groupJobsKey);
+    if (!raw) {
+      return [];
+    }
+
+    // Convert the hgetall object to a flat array for jobsFromRaw
+    const flatArray: string[] = [];
+    for (const [key, value] of Object.entries(raw)) {
+      flatArray.push(key, value);
+    }
+
+    return JobGroupClass.jobsFromRaw(flatArray, prefix);
+  }
+
+  /**
+   * Cancels an active group, removing pending jobs and triggering compensation
+   * for already-completed jobs.
+   *
+   * @param groupId - The unique group identifier.
+   * @throws InvalidGroupStateError if the group is already COMPLETED, COMPENSATING,
+   *   FAILED, or FAILED_COMPENSATION.
+   */
+  async cancelGroup(groupId: string): Promise<void> {
+    const client = await this.client;
+    const result = await this.scripts.cancelGroupJobs(
+      client,
+      this.name,
+      groupId,
+    );
+
+    if (result.error !== undefined) {
+      if (result.error === -2) {
+        throw new InvalidGroupStateError('Cannot cancel a completed group');
+      } else if (result.error === -3) {
+        const state = await this.getGroupState(groupId);
+        throw new InvalidGroupStateError(
+          `Cannot cancel group in state ${state?.state || 'unknown'}`,
+        );
+      }
+      return;
+    }
+
+    // Trigger compensation for completed jobs if any exist
+    if (result.completedJobsForCompensation.length > 0) {
+      const prefix = (this.opts as any)?.prefix || 'bull';
+      const groupHashKey = `${prefix}:${this.name}:groups:${groupId}`;
+      const raw = await client.hget(groupHashKey, 'compensation');
+      const compensation = raw ? JSON.parse(raw) : {};
+
+      const compensationQueueName = `${this.name}-compensation`;
+      await this.scripts.triggerCompensation(
+        client,
+        compensationQueueName,
+        result.completedJobsForCompensation,
+        compensation,
+        groupId,
+        this.name,
+      );
+    }
   }
 }

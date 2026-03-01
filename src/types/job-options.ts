@@ -107,4 +107,12 @@ export type RedisJobOptions = BaseJobOptions & {
    * Deduplication options.
    */
   de?: DeduplicationOptions;
+
+  /**
+   * Group membership (compressed key for group field in BaseJobOptions).
+   */
+  grp?: {
+    id: string;
+    name: string;
+  };
 };

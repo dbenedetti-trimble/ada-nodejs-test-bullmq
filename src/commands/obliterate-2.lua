@@ -113,6 +113,20 @@ if(maxCount > 0) then
     baseKey .. 'metrics:completed:data',
     baseKey .. 'metrics:failed',
     baseKey .. 'metrics:failed:data')
+
+  -- TODO(features): scan and delete group-related keys
+  -- Group keys: {baseKey}groups (ZSET), {baseKey}groups:{groupId} (HASH), {baseKey}groups:{groupId}:jobs (HASH)
+  -- Pattern: baseKey .. 'groups*'
+  -- The existing SCAN pattern {baseKey}* should cover group keys if obliterate is called with full queue base key.
+  -- Add explicit cleanup here to be safe:
+  local groupIndexKey = baseKey .. 'groups'
+  local groupIds = rcall("ZRANGE", groupIndexKey, 0, -1)
+  for _, groupId in ipairs(groupIds) do
+    rcall("DEL", baseKey .. 'groups:' .. groupId)
+    rcall("DEL", baseKey .. 'groups:' .. groupId .. ':jobs')
+  end
+  rcall("DEL", groupIndexKey)
+
   return 0
 else
   return 1

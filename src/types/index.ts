@@ -2,6 +2,7 @@ export * from './backoff-strategy';
 export * from './database-type';
 export * from './deduplication-options';
 export * from './finished-status';
+export * from './group-state';
 export * from './job-json-sandbox';
 export * from './job-options';
 export * from './job-scheduler-template-options';

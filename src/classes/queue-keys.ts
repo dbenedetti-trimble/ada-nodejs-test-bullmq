@@ -39,4 +39,16 @@ export class QueueKeys {
   getQueueQualifiedName(name: string): string {
     return `${this.prefix}:${name}`;
   }
+
+  toGroupKey(queueName: string, groupId: string): string {
+    return this.toKey(queueName, `groups:${groupId}`);
+  }
+
+  toGroupJobsKey(queueName: string, groupId: string): string {
+    return this.toKey(queueName, `groups:${groupId}:jobs`);
+  }
+
+  toGroupsIndexKey(queueName: string): string {
+    return this.toKey(queueName, 'groups');
+  }
 }

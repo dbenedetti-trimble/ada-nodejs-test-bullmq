@@ -107,4 +107,12 @@ export interface BaseJobOptions extends DefaultJobOptions {
    * Internal property used by repeatable jobs.
    */
   prevMillis?: number;
+
+  /**
+   * Group membership options. Set internally by addGroup(); do not set manually.
+   */
+  group?: {
+    id: string;
+    name: string;
+  };
 }
