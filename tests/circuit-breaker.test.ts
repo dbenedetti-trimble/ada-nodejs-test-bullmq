@@ -213,16 +213,12 @@ describe('Circuit breaker', () => {
 
   describe('configuration (CB-1)', () => {
     it('accepts circuitBreaker option on Worker construction', async () => {
-      const worker = new Worker(
-        queueName,
-        async () => {},
-        {
-          connection,
-          prefix,
-          circuitBreaker: { threshold: 3, duration: 5000 },
-          autorun: false,
-        },
-      );
+      const worker = new Worker(queueName, async () => {}, {
+        connection,
+        prefix,
+        circuitBreaker: { threshold: 3, duration: 5000 },
+        autorun: false,
+      });
       expect(worker.getCircuitBreakerState()).toBe('closed');
       await worker.close();
     });
@@ -264,11 +260,11 @@ describe('Circuit breaker', () => {
     });
 
     it('omitting circuitBreaker produces identical behavior to current BullMQ', async () => {
-      const worker = new Worker(
-        queueName,
-        async () => {},
-        { connection, prefix, autorun: false },
-      );
+      const worker = new Worker(queueName, async () => {}, {
+        connection,
+        prefix,
+        autorun: false,
+      });
       expect(worker.getCircuitBreakerState()).toBeUndefined();
       await worker.close();
     });
@@ -277,11 +273,11 @@ describe('Circuit breaker', () => {
   // VAL-16: getCircuitBreakerState() returns undefined when not configured
   describe('no circuitBreaker option (VAL-16)', () => {
     it('getCircuitBreakerState() returns undefined', async () => {
-      const worker = new Worker(
-        queueName,
-        async () => {},
-        { connection, prefix, autorun: false },
-      );
+      const worker = new Worker(queueName, async () => {}, {
+        connection,
+        prefix,
+        autorun: false,
+      });
       expect(worker.getCircuitBreakerState()).toBeUndefined();
       await worker.close();
     });
@@ -320,7 +316,7 @@ describe('Circuit breaker', () => {
         }
 
         // Wait until circuit opens
-        await new Promise<void>((resolve) => {
+        await new Promise<void>(resolve => {
           worker.on('circuit:open', () => resolve());
         });
 
@@ -351,7 +347,7 @@ describe('Circuit breaker', () => {
         await worker.waitUntilReady();
 
         let openPayload: { failures: number; threshold: number } | undefined;
-        const openPromise = new Promise<void>((resolve) => {
+        const openPromise = new Promise<void>(resolve => {
           worker.on('circuit:open', payload => {
             openPayload = payload;
             resolve();
@@ -397,7 +393,7 @@ describe('Circuit breaker', () => {
         await worker.waitUntilReady();
 
         // Wait for circuit to open
-        const openPromise = new Promise<void>((resolve) => {
+        const openPromise = new Promise<void>(resolve => {
           worker.on('circuit:open', () => resolve());
         });
 
@@ -432,7 +428,9 @@ describe('Circuit breaker', () => {
           async () => {
             attempt++;
             // Fail first 2 jobs, succeed the 3rd
-            if (attempt <= 2) throw new Error('fail');
+            if (attempt <= 2) {
+              throw new Error('fail');
+            }
           },
           {
             connection,
@@ -472,7 +470,9 @@ describe('Circuit breaker', () => {
         const worker = new Worker(
           queueName,
           async job => {
-            if (job.data.fail) throw new Error('fail');
+            if (job.data.fail) {
+              throw new Error('fail');
+            }
           },
           {
             connection,
@@ -508,7 +508,9 @@ describe('Circuit breaker', () => {
         const worker = new Worker(
           queueName,
           async job => {
-            if (job.data.fail) throw new Error('fail');
+            if (job.data.fail) {
+              throw new Error('fail');
+            }
           },
           {
             connection,
@@ -548,7 +550,9 @@ describe('Circuit breaker', () => {
       async () => {
         const worker = new Worker(
           queueName,
-          async () => { throw new Error('fail'); },
+          async () => {
+            throw new Error('fail');
+          },
           {
             connection,
             prefix,
@@ -566,7 +570,9 @@ describe('Circuit breaker', () => {
         expect(worker.getCircuitBreakerState()).toBe('open');
 
         // Wait for duration + buffer
-        await new Promise<void>(resolve => worker.on('circuit:half-open', resolve));
+        await new Promise<void>(resolve =>
+          worker.on('circuit:half-open', resolve),
+        );
         expect(worker.getCircuitBreakerState()).toBe('half-open');
 
         await worker.close();
@@ -580,7 +586,9 @@ describe('Circuit breaker', () => {
         const duration = 200;
         const worker = new Worker(
           queueName,
-          async () => { throw new Error('fail'); },
+          async () => {
+            throw new Error('fail');
+          },
           {
             connection,
             prefix,
@@ -622,7 +630,9 @@ describe('Circuit breaker', () => {
         const worker = new Worker(
           queueName,
           async () => {
-            if (shouldFail) throw new Error('fail');
+            if (shouldFail) {
+              throw new Error('fail');
+            }
           },
           {
             connection,
@@ -642,10 +652,14 @@ describe('Circuit breaker', () => {
         shouldFail = false;
 
         // Wait for HALF_OPEN, then add a test job
-        await new Promise<void>(resolve => worker.on('circuit:half-open', resolve));
+        await new Promise<void>(resolve =>
+          worker.on('circuit:half-open', resolve),
+        );
         await queue.add('test-job', {}, { attempts: 1 });
 
-        await new Promise<void>(resolve => worker.on('circuit:closed', resolve));
+        await new Promise<void>(resolve =>
+          worker.on('circuit:closed', resolve),
+        );
         expect(worker.getCircuitBreakerState()).toBe('closed');
 
         await worker.close();
@@ -660,7 +674,9 @@ describe('Circuit breaker', () => {
         const worker = new Worker(
           queueName,
           async () => {
-            if (shouldFail) throw new Error('fail');
+            if (shouldFail) {
+              throw new Error('fail');
+            }
           },
           {
             connection,
@@ -676,7 +692,9 @@ describe('Circuit breaker', () => {
         await new Promise<void>(resolve => worker.on('circuit:open', resolve));
 
         shouldFail = false;
-        await new Promise<void>(resolve => worker.on('circuit:half-open', resolve));
+        await new Promise<void>(resolve =>
+          worker.on('circuit:half-open', resolve),
+        );
 
         const testJob = await queue.add('test-job', {}, { attempts: 1 });
 
@@ -706,7 +724,9 @@ describe('Circuit breaker', () => {
         const worker = new Worker(
           queueName,
           async () => {
-            if (shouldFail) throw new Error('fail');
+            if (shouldFail) {
+              throw new Error('fail');
+            }
             completedCount++;
           },
           {
@@ -723,10 +743,14 @@ describe('Circuit breaker', () => {
         await new Promise<void>(resolve => worker.on('circuit:open', resolve));
 
         shouldFail = false;
-        await new Promise<void>(resolve => worker.on('circuit:half-open', resolve));
+        await new Promise<void>(resolve =>
+          worker.on('circuit:half-open', resolve),
+        );
         await queue.add('test-job', {}, { attempts: 1 });
 
-        await new Promise<void>(resolve => worker.on('circuit:closed', resolve));
+        await new Promise<void>(resolve =>
+          worker.on('circuit:closed', resolve),
+        );
 
         // Add more jobs after closed — they should be processed
         await queue.add('normal-job', {}, { attempts: 1 });
@@ -747,7 +771,9 @@ describe('Circuit breaker', () => {
       async () => {
         const worker = new Worker(
           queueName,
-          async () => { throw new Error('always fail'); },
+          async () => {
+            throw new Error('always fail');
+          },
           {
             connection,
             prefix,
@@ -760,21 +786,17 @@ describe('Circuit breaker', () => {
 
         await queue.add('job', {}, { attempts: 1 });
         await new Promise<void>(resolve => worker.on('circuit:open', resolve));
-        await new Promise<void>(resolve => worker.on('circuit:half-open', resolve));
+        await new Promise<void>(resolve =>
+          worker.on('circuit:half-open', resolve),
+        );
 
         // Add a test job — it will fail → circuit back to OPEN
         await queue.add('test-job', {}, { attempts: 1 });
 
-        // Wait for a second circuit:open event
-        const secondOpen = new Promise<void>(resolve => {
-          let count = 0;
-          worker.on('circuit:open', () => {
-            count++;
-            if (count >= 2) resolve();
-          });
-        });
-
-        await secondOpen;
+        // Wait for the next circuit:open event (the first one was already consumed above)
+        await new Promise<void>(resolve =>
+          worker.once('circuit:open', resolve),
+        );
         expect(worker.getCircuitBreakerState()).toBe('open');
 
         await worker.close();
@@ -788,7 +810,9 @@ describe('Circuit breaker', () => {
         const duration = 200;
         const worker = new Worker(
           queueName,
-          async () => { throw new Error('always fail'); },
+          async () => {
+            throw new Error('always fail');
+          },
           {
             connection,
             prefix,
@@ -801,28 +825,21 @@ describe('Circuit breaker', () => {
 
         await queue.add('job', {}, { attempts: 1 });
         await new Promise<void>(resolve => worker.on('circuit:open', resolve));
-        await new Promise<void>(resolve => worker.on('circuit:half-open', resolve));
+        await new Promise<void>(resolve =>
+          worker.on('circuit:half-open', resolve),
+        );
 
-        // Test job fails, circuit re-opens
+        // Test job fails, circuit re-opens; the previous circuit:open listener was already consumed
         await queue.add('test-job', {}, { attempts: 1 });
-        await new Promise<void>((resolve) => {
-          let openCount = 0;
-          worker.on('circuit:open', () => {
-            openCount++;
-            if (openCount >= 2) resolve();
-          });
-        });
+        await new Promise<void>(resolve =>
+          worker.once('circuit:open', resolve),
+        );
 
         // Timer should restart — after duration ms, we should get half-open again
-        const secondHalfOpen = new Promise<void>(resolve => {
-          let count = 0;
-          worker.on('circuit:half-open', () => {
-            count++;
-            if (count >= 2) resolve();
-          });
-        });
-
-        await secondHalfOpen;
+        // The previous circuit:half-open listener was already consumed above
+        await new Promise<void>(resolve =>
+          worker.once('circuit:half-open', resolve),
+        );
         expect(worker.getCircuitBreakerState()).toBe('half-open');
 
         await worker.close();
@@ -838,7 +855,9 @@ describe('Circuit breaker', () => {
       async () => {
         const worker = new Worker(
           queueName,
-          async () => { throw new Error('fail'); },
+          async () => {
+            throw new Error('fail');
+          },
           {
             connection,
             prefix,
@@ -868,7 +887,9 @@ describe('Circuit breaker', () => {
       async () => {
         const worker = new Worker(
           queueName,
-          async () => { throw new Error('fail'); },
+          async () => {
+            throw new Error('fail');
+          },
           {
             connection,
             prefix,
@@ -884,7 +905,9 @@ describe('Circuit breaker', () => {
         await worker.close();
 
         const eventsAfterClose: string[] = [];
-        worker.on('circuit:half-open', () => eventsAfterClose.push('half-open'));
+        worker.on('circuit:half-open', () =>
+          eventsAfterClose.push('half-open'),
+        );
         worker.on('circuit:closed', () => eventsAfterClose.push('closed'));
 
         // Wait past the duration
@@ -902,42 +925,53 @@ describe('Circuit breaker', () => {
       async () => {
         const threshold = 3;
 
-        // Use a very short lock duration so the job stalls quickly
-        const worker = new Worker(
+        // Worker 1: hangs indefinitely and is force-closed to abandon its lock.
+        const worker1 = new Worker(
           queueName,
           async () => {
-            // Simulate hanging — job will stall
             await delay(60000);
           },
           {
             connection,
             prefix,
-            circuitBreaker: { threshold, duration: 10000 },
             autorun: true,
-            lockDuration: 100,
+            lockDuration: 1000,
             stalledInterval: 100,
             maxStalledCount: 0,
           },
         );
 
-        await worker.waitUntilReady();
-
-        const openEvents: string[] = [];
-        worker.on('circuit:open', () => openEvents.push('open'));
-
+        await worker1.waitUntilReady();
         await queue.add('stall-job', {}, { attempts: 1 });
 
-        // Wait for stall to be detected
-        await new Promise<void>(resolve => {
-          worker.on('stalled', () => resolve());
+        // Wait for the job to become active, then force-close to abandon the lock.
+        await new Promise<void>(resolve => worker1.on('active', resolve));
+        await worker1.close(true);
+
+        // Worker 2: runs the stalled checker. It has the circuit breaker configured.
+        const worker2 = new Worker(queueName, async () => {}, {
+          connection,
+          prefix,
+          circuitBreaker: { threshold, duration: 10000 },
+          autorun: true,
+          stalledInterval: 100,
+          maxStalledCount: 0,
         });
+
+        await worker2.waitUntilReady();
+
+        const openEvents: string[] = [];
+        worker2.on('circuit:open', () => openEvents.push('open'));
+
+        // Wait for the stall to be detected
+        await new Promise<void>(resolve => worker2.on('stalled', resolve));
 
         // Give time for any would-be circuit open event to fire (it shouldn't)
         await delay(300);
         expect(openEvents).toHaveLength(0);
-        expect(worker.getCircuitBreakerState()).toBe('closed');
+        expect(worker2.getCircuitBreakerState()).toBe('closed');
 
-        await worker.close();
+        await worker2.close();
       },
       TEST_TIMEOUT,
     );
@@ -950,7 +984,9 @@ describe('Circuit breaker', () => {
       async () => {
         const worker = new Worker(
           queueName,
-          async () => { throw new Error('fail'); },
+          async () => {
+            throw new Error('fail');
+          },
           {
             connection,
             prefix,
@@ -965,7 +1001,9 @@ describe('Circuit breaker', () => {
         const openPromise = new Promise<void>(resolve => {
           worker.on('circuit:open', () => {
             openCount++;
-            if (openCount === 1) resolve();
+            if (openCount === 1) {
+              resolve();
+            }
           });
         });
 
@@ -987,7 +1025,9 @@ describe('Circuit breaker', () => {
       async () => {
         const worker = new Worker(
           queueName,
-          async () => { throw new Error('fail'); },
+          async () => {
+            throw new Error('fail');
+          },
           {
             connection,
             prefix,
@@ -1002,7 +1042,9 @@ describe('Circuit breaker', () => {
         const halfOpenPromise = new Promise<void>(resolve => {
           worker.on('circuit:half-open', () => {
             halfOpenCount++;
-            if (halfOpenCount === 1) resolve();
+            if (halfOpenCount === 1) {
+              resolve();
+            }
           });
         });
 
@@ -1024,7 +1066,11 @@ describe('Circuit breaker', () => {
         let shouldFail = true;
         const worker = new Worker(
           queueName,
-          async () => { if (shouldFail) throw new Error('fail'); },
+          async () => {
+            if (shouldFail) {
+              throw new Error('fail');
+            }
+          },
           {
             connection,
             prefix,
@@ -1039,7 +1085,9 @@ describe('Circuit breaker', () => {
         const closedPromise = new Promise<void>(resolve => {
           worker.on('circuit:closed', () => {
             closedCount++;
-            if (closedCount === 1) resolve();
+            if (closedCount === 1) {
+              resolve();
+            }
           });
         });
 
@@ -1047,7 +1095,9 @@ describe('Circuit breaker', () => {
         await new Promise<void>(resolve => worker.on('circuit:open', resolve));
 
         shouldFail = false;
-        await new Promise<void>(resolve => worker.on('circuit:half-open', resolve));
+        await new Promise<void>(resolve =>
+          worker.on('circuit:half-open', resolve),
+        );
         await queue.add('test-job', {}, { attempts: 1 });
 
         await closedPromise;
@@ -1064,7 +1114,9 @@ describe('Circuit breaker', () => {
       async () => {
         const worker = new Worker(
           queueName,
-          async () => { throw new Error('fail'); },
+          async () => {
+            throw new Error('fail');
+          },
           { connection, prefix, autorun: true },
         );
 

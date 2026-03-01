@@ -28,24 +28,43 @@ describe('Backoff strategies', () => {
   describe('linear strategy', () => {
     it('produces delay = baseDelay * attemptsMade for attempt 1', async () => {
       const backoff: BackoffOptions = { type: 'linear', delay: 1000 };
-      const result = await Backoffs.calculate(backoff, 1, new Error(), makeJob());
+      const result = await Backoffs.calculate(
+        backoff,
+        1,
+        new Error(),
+        makeJob(),
+      );
       expect(result).toBe(1000);
     });
 
     it('produces delay = baseDelay * attemptsMade for attempt 2', async () => {
       const backoff: BackoffOptions = { type: 'linear', delay: 1000 };
-      const result = await Backoffs.calculate(backoff, 2, new Error(), makeJob());
+      const result = await Backoffs.calculate(
+        backoff,
+        2,
+        new Error(),
+        makeJob(),
+      );
       expect(result).toBe(2000);
     });
 
     it('produces delay = baseDelay * attemptsMade for attempt 3', async () => {
       const backoff: BackoffOptions = { type: 'linear', delay: 1000 };
-      const result = await Backoffs.calculate(backoff, 3, new Error(), makeJob());
+      const result = await Backoffs.calculate(
+        backoff,
+        3,
+        new Error(),
+        makeJob(),
+      );
       expect(result).toBe(3000);
     });
 
     it('applies jitter within [delay*(1-jitter), delay] range (VAL-19)', async () => {
-      const backoff: BackoffOptions = { type: 'linear', delay: 1000, jitter: 0.5 };
+      const backoff: BackoffOptions = {
+        type: 'linear',
+        delay: 1000,
+        jitter: 0.5,
+      };
       for (let i = 0; i < 50; i++) {
         const result = (await Backoffs.calculate(
           backoff,
@@ -68,28 +87,56 @@ describe('Backoff strategies', () => {
   describe('polynomial strategy', () => {
     it('defaults to exponent 2 (quadratic) when exponent is omitted', async () => {
       const backoff: BackoffOptions = { type: 'polynomial', delay: 500 };
-      const result = await Backoffs.calculate(backoff, 2, new Error(), makeJob());
+      const result = await Backoffs.calculate(
+        backoff,
+        2,
+        new Error(),
+        makeJob(),
+      );
       // 500 * 2^2 = 2000
       expect(result).toBe(2000);
     });
 
     it('computes delay = baseDelay * attemptsMade^exponent for exponent 2', async () => {
-      const backoff: BackoffOptions = { type: 'polynomial', delay: 500, exponent: 2 };
+      const backoff: BackoffOptions = {
+        type: 'polynomial',
+        delay: 500,
+        exponent: 2,
+      };
       // attempt 1: 500*1 = 500, attempt 2: 500*4 = 2000, attempt 3: 500*9 = 4500
-      expect(await Backoffs.calculate(backoff, 1, new Error(), makeJob())).toBe(500);
-      expect(await Backoffs.calculate(backoff, 2, new Error(), makeJob())).toBe(2000);
-      expect(await Backoffs.calculate(backoff, 3, new Error(), makeJob())).toBe(4500);
+      expect(await Backoffs.calculate(backoff, 1, new Error(), makeJob())).toBe(
+        500,
+      );
+      expect(await Backoffs.calculate(backoff, 2, new Error(), makeJob())).toBe(
+        2000,
+      );
+      expect(await Backoffs.calculate(backoff, 3, new Error(), makeJob())).toBe(
+        4500,
+      );
     });
 
     it('computes delay = baseDelay * attemptsMade^exponent for exponent 3', async () => {
-      const backoff: BackoffOptions = { type: 'polynomial', delay: 100, exponent: 3 };
+      const backoff: BackoffOptions = {
+        type: 'polynomial',
+        delay: 100,
+        exponent: 3,
+      };
       // attempt 1: 100*1 = 100, attempt 2: 100*8 = 800
-      expect(await Backoffs.calculate(backoff, 1, new Error(), makeJob())).toBe(100);
-      expect(await Backoffs.calculate(backoff, 2, new Error(), makeJob())).toBe(800);
+      expect(await Backoffs.calculate(backoff, 1, new Error(), makeJob())).toBe(
+        100,
+      );
+      expect(await Backoffs.calculate(backoff, 2, new Error(), makeJob())).toBe(
+        800,
+      );
     });
 
     it('applies jitter identically to other strategies', async () => {
-      const backoff: BackoffOptions = { type: 'polynomial', delay: 1000, exponent: 2, jitter: 0.25 };
+      const backoff: BackoffOptions = {
+        type: 'polynomial',
+        delay: 1000,
+        exponent: 2,
+        jitter: 0.25,
+      };
       for (let i = 0; i < 50; i++) {
         const result = (await Backoffs.calculate(
           backoff,
@@ -104,17 +151,18 @@ describe('Backoff strategies', () => {
     });
 
     it('throws when exponent is non-positive', () => {
-      const backoff: BackoffOptions = { type: 'polynomial', delay: 1000, exponent: 0 };
+      const backoff: BackoffOptions = {
+        type: 'polynomial',
+        delay: 1000,
+        exponent: 0,
+      };
       expect(() =>
         Backoffs.calculate(backoff, 1, new Error(), makeJob()),
       ).toThrow();
     });
 
-    it('is registered via lookupStrategy (not in builtinStrategies)', async () => {
-      // polynomial is handled directly in lookupStrategy, not via builtinStrategies
-      const backoff: BackoffOptions = { type: 'polynomial', delay: 100 };
-      const result = await Backoffs.calculate(backoff, 1, new Error(), makeJob());
-      expect(result).toBe(100);
+    it('is registered in Backoffs.builtinStrategies', () => {
+      expect(typeof Backoffs.builtinStrategies['polynomial']).toBe('function');
     });
   });
 
@@ -128,7 +176,12 @@ describe('Backoff strategies', () => {
       };
       const job = makeJob();
       for (let attempt = 1; attempt <= 10; attempt++) {
-        const result = (await Backoffs.calculate(backoff, attempt, new Error(), job)) as number;
+        const result = (await Backoffs.calculate(
+          backoff,
+          attempt,
+          new Error(),
+          job,
+        )) as number;
         expect(result).toBeGreaterThanOrEqual(1000);
       }
     });
@@ -141,7 +194,12 @@ describe('Backoff strategies', () => {
       };
       const job = makeJob();
       for (let attempt = 1; attempt <= 20; attempt++) {
-        const result = (await Backoffs.calculate(backoff, attempt, new Error(), job)) as number;
+        const result = (await Backoffs.calculate(
+          backoff,
+          attempt,
+          new Error(),
+          job,
+        )) as number;
         expect(result).toBeLessThanOrEqual(5000);
       }
     });
@@ -155,7 +213,12 @@ describe('Backoff strategies', () => {
       const delays: number[] = [];
       const job = makeJob();
       for (let attempt = 1; attempt <= 20; attempt++) {
-        const result = (await Backoffs.calculate(backoff, attempt, new Error(), job)) as number;
+        const result = (await Backoffs.calculate(
+          backoff,
+          attempt,
+          new Error(),
+          job,
+        )) as number;
         delays.push(result);
       }
       // With 20 attempts and randomness, not all delays should be strictly increasing
@@ -191,20 +254,21 @@ describe('Backoff strategies', () => {
       };
       // Should not throw; jitter is simply unused
       const job = makeJob();
-      const result = await Backoffs.calculate(backoffWithJitter, 1, new Error(), job);
-      expect(typeof result === 'number' || result instanceof Promise).toBeTruthy();
+      const result = await Backoffs.calculate(
+        backoffWithJitter,
+        1,
+        new Error(),
+        job,
+      );
+      expect(
+        typeof result === 'number' || result instanceof Promise,
+      ).toBeTruthy();
     });
 
-    it('is handled by lookupStrategy for decorrelatedJitter type', async () => {
-      const backoff: BackoffOptions = {
-        type: 'decorrelatedJitter',
-        delay: 1000,
-        maxDelay: 30000,
-      };
-      const job = makeJob();
-      const result = (await Backoffs.calculate(backoff, 1, new Error(), job)) as number;
-      expect(result).toBeGreaterThanOrEqual(1000);
-      expect(result).toBeLessThanOrEqual(30000);
+    it('is registered in Backoffs.builtinStrategies', () => {
+      expect(typeof Backoffs.builtinStrategies['decorrelatedJitter']).toBe(
+        'function',
+      );
     });
   });
 
@@ -217,7 +281,12 @@ describe('Backoff strategies', () => {
         delay: 1000,
         maxDelay: 10000,
       };
-      const result = await Backoffs.calculate(backoff, 5, new Error(), makeJob());
+      const result = await Backoffs.calculate(
+        backoff,
+        5,
+        new Error(),
+        makeJob(),
+      );
       expect(result).toBe(10000);
     });
 
@@ -228,7 +297,12 @@ describe('Backoff strategies', () => {
         delay: 5000,
         maxDelay: 15000,
       };
-      const result = await Backoffs.calculate(backoff, 4, new Error(), makeJob());
+      const result = await Backoffs.calculate(
+        backoff,
+        4,
+        new Error(),
+        makeJob(),
+      );
       expect(result).toBe(15000);
     });
 
@@ -238,7 +312,12 @@ describe('Backoff strategies', () => {
         delay: 1000,
         maxDelay: 50000,
       };
-      const result = await Backoffs.calculate(backoff, 2, new Error(), makeJob());
+      const result = await Backoffs.calculate(
+        backoff,
+        2,
+        new Error(),
+        makeJob(),
+      );
       expect(result).toBe(2000);
     });
 
@@ -249,7 +328,12 @@ describe('Backoff strategies', () => {
         maxDelay: 0,
       };
       // attempt 5: 2^4 * 1000 = 16000ms, no cap → 16000
-      const result = await Backoffs.calculate(backoff, 5, new Error(), makeJob());
+      const result = await Backoffs.calculate(
+        backoff,
+        5,
+        new Error(),
+        makeJob(),
+      );
       expect(result).toBe(16000);
     });
 
@@ -270,14 +354,15 @@ describe('Backoff strategies', () => {
       expect(result).toBe(5000);
     });
 
-    it('throws when maxDelay is negative via custom strategy', async () => {
+    it('throws when maxDelay is negative', () => {
       const backoff: BackoffOptions = {
-        type: 'unknown-strategy',
+        type: 'fixed',
         delay: 1000,
+        maxDelay: -100,
       };
-      await expect(
+      expect(() =>
         Backoffs.calculate(backoff, 1, new Error(), makeJob()),
-      ).rejects.toThrow();
+      ).toThrow(/maxDelay/);
     });
   });
 
@@ -292,8 +377,7 @@ describe('Backoff strategies', () => {
         RateLimitError: { type: 'fixed', delay: 30000 },
       };
 
-      const effectiveBackoff =
-        errorBackoffs[rateLimitError.name] ?? backoff;
+      const effectiveBackoff = errorBackoffs[rateLimitError.name] ?? backoff;
       const result = await Backoffs.calculate(
         effectiveBackoff,
         1,
@@ -334,7 +418,12 @@ describe('Backoff strategies', () => {
 
     it('omitting errorBackoffs preserves current behavior exactly', async () => {
       const backoff: BackoffOptions = { type: 'fixed', delay: 2000 };
-      const result = await Backoffs.calculate(backoff, 1, new Error(), makeJob());
+      const result = await Backoffs.calculate(
+        backoff,
+        1,
+        new Error(),
+        makeJob(),
+      );
       expect(result).toBe(2000);
     });
 
@@ -362,17 +451,29 @@ describe('Backoff strategies', () => {
   describe('existing strategies (regression)', () => {
     it('fixed strategy produces identical output to current behavior (VAL-09)', async () => {
       const backoff: BackoffOptions = { type: 'fixed', delay: 2000 };
-      expect(await Backoffs.calculate(backoff, 1, new Error(), makeJob())).toBe(2000);
-      expect(await Backoffs.calculate(backoff, 2, new Error(), makeJob())).toBe(2000);
-      expect(await Backoffs.calculate(backoff, 3, new Error(), makeJob())).toBe(2000);
+      expect(await Backoffs.calculate(backoff, 1, new Error(), makeJob())).toBe(
+        2000,
+      );
+      expect(await Backoffs.calculate(backoff, 2, new Error(), makeJob())).toBe(
+        2000,
+      );
+      expect(await Backoffs.calculate(backoff, 3, new Error(), makeJob())).toBe(
+        2000,
+      );
     });
 
     it('exponential strategy produces identical output to current behavior (VAL-10)', async () => {
       const backoff: BackoffOptions = { type: 'exponential', delay: 1000 };
       // attempt 1: 2^0 * 1000 = 1000, attempt 2: 2^1 * 1000 = 2000, attempt 3: 2^2 * 1000 = 4000
-      expect(await Backoffs.calculate(backoff, 1, new Error(), makeJob())).toBe(1000);
-      expect(await Backoffs.calculate(backoff, 2, new Error(), makeJob())).toBe(2000);
-      expect(await Backoffs.calculate(backoff, 3, new Error(), makeJob())).toBe(4000);
+      expect(await Backoffs.calculate(backoff, 1, new Error(), makeJob())).toBe(
+        1000,
+      );
+      expect(await Backoffs.calculate(backoff, 2, new Error(), makeJob())).toBe(
+        2000,
+      );
+      expect(await Backoffs.calculate(backoff, 3, new Error(), makeJob())).toBe(
+        4000,
+      );
     });
   });
 });

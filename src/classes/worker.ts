@@ -299,18 +299,14 @@ export class Worker<
         !Number.isInteger(cb.threshold) ||
         cb.threshold <= 0
       ) {
-        throw new Error(
-          'circuitBreaker.threshold must be a positive integer',
-        );
+        throw new Error('circuitBreaker.threshold must be a positive integer');
       }
       if (
         typeof cb.duration !== 'number' ||
         !Number.isInteger(cb.duration) ||
         cb.duration <= 0
       ) {
-        throw new Error(
-          'circuitBreaker.duration must be a positive integer',
-        );
+        throw new Error('circuitBreaker.duration must be a positive integer');
       }
       const halfOpenMaxAttempts = cb.halfOpenMaxAttempts ?? 1;
       this.circuitBreaker = new CircuitBreaker(
@@ -725,7 +721,14 @@ export class Worker<
           this.circuitBreaker &&
           this.circuitBreaker.getState() === CircuitBreakerState.OPEN
         ) {
-          await this.delay(this.opts.drainDelay * 1000);
+          if (!this.closing) {
+            this.abortDelayController?.abort();
+            this.abortDelayController = new AbortController();
+            await this.delay(
+              this.opts.drainDelay * 1000,
+              this.abortDelayController,
+            );
+          }
         } else {
           await this.waitForRateLimit();
         }
