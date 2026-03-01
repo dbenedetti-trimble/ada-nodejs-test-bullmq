@@ -37,8 +37,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -1116,34 +1117,52 @@ export class Queue<
 
   /**
    * Replays all (or filtered) DLQ jobs back to their original source queues.
-   * Returns the count of replayed jobs.
+   * Returns the count of replayed jobs. Processes jobs in batches to avoid
+   * loading the entire DLQ into memory.
    */
   async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
-    const jobs = await this.getWaiting(0, -1);
-    if (jobs.length === 0) {
-      return 0;
-    }
-
+    const batchSize = 100;
     let count = 0;
-    for (const job of jobs) {
-      const dlqMeta = (job.data as any)?._dlqMeta;
-      if (!dlqMeta) {
-        continue;
+    let offset = 0;
+
+    while (true) {
+      const jobs = await this.getWaiting(offset, offset + batchSize - 1);
+      if (jobs.length === 0) {
+        break;
       }
 
-      if (filter?.name !== undefined && job.name !== filter.name) {
-        continue;
-      }
-
-      if (filter?.failedReason !== undefined) {
-        const reason: string = (dlqMeta.failedReason || '').toLowerCase();
-        if (!reason.includes(filter.failedReason.toLowerCase())) {
+      let skipped = 0;
+      for (const job of jobs) {
+        const dlqMeta = (job.data as any)?._dlqMeta;
+        if (!dlqMeta) {
+          skipped++;
           continue;
         }
+
+        if (filter?.name !== undefined && job.name !== filter.name) {
+          skipped++;
+          continue;
+        }
+
+        if (filter?.failedReason !== undefined) {
+          const reason: string = (dlqMeta.failedReason || '').toLowerCase();
+          if (!reason.includes(filter.failedReason.toLowerCase())) {
+            skipped++;
+            continue;
+          }
+        }
+
+        await this.replayDeadLetter(job.id!);
+        count++;
       }
 
-      await this.replayDeadLetter(job.id!);
-      count++;
+      // Advance offset past the non-matching (skipped) jobs that remain in place.
+      // Matched jobs were removed, so the effective list shifted by the number replayed.
+      offset += skipped;
+
+      if (jobs.length < batchSize) {
+        break;
+      }
     }
 
     return count;

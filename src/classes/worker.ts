@@ -1151,7 +1151,7 @@ will never work with more accuracy than 1ms. */
 
       this.emit('failed', job, err, 'active');
 
-      if (this.opts.deadLetterQueue && job.finishedOn) {
+      if (job.deadLettered && this.opts.deadLetterQueue) {
         this.emit('deadLettered', job, this.opts.deadLetterQueue.queueName);
       }
 

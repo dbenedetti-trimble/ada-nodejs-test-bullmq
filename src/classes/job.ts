@@ -139,6 +139,11 @@ export class Job<
   finishedOn?: number;
 
   /**
+   * True when this job was routed to a dead letter queue on terminal failure.
+   */
+  deadLettered = false;
+
+  /**
    * Timestamp for when the job was processed.
    */
   processedOn?: number;
@@ -860,7 +865,7 @@ export class Job<
             this.recordJobMetrics('retried');
           }
         } else {
-          const workerOpts = (this.queue.opts as WorkerOptions);
+          const workerOpts = this.queue.opts as WorkerOptions;
           if (workerOpts?.deadLetterQueue) {
             const dlqJobId = v4();
             const args = this.scripts.moveToDeadLetterArgs(
@@ -873,8 +878,26 @@ export class Job<
               fieldsToUpdate,
             );
 
-            await this.scripts.moveToDeadLetter(this.id, args);
-            finishedOn = Date.now();
+            try {
+              await this.scripts.moveToDeadLetter(this.id, args);
+              finishedOn = Date.now();
+              this.deadLettered = true;
+            } catch (dlqErr) {
+              // DLQ routing failed; fall back to normal failed set to prevent job loss
+              const failedArgs = this.scripts.moveToFailedArgs(
+                this,
+                this.failedReason,
+                this.opts.removeOnFail,
+                token,
+                fetchNext,
+                fieldsToUpdate,
+              );
+
+              result = await this.scripts.moveToFinished(this.id, failedArgs);
+              finishedOn = failedArgs[
+                this.scripts.moveToFinishedKeys.length + 1
+              ] as number;
+            }
           } else {
             const args = this.scripts.moveToFailedArgs(
               this,

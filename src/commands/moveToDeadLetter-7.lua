@@ -45,12 +45,16 @@ if numRemovedElements < 1 then
   return -3
 end
 
-local jobFields = rcall("HMGET", KEYS[2], "name", "data", "opts")
+local jobFields = rcall("HMGET", KEYS[2], "name", "data", "opts", "timestamp")
 local jobName = jobFields[1]
 local originalData = jobFields[2]
 local jobOpts = jobFields[3]
+local sourceTimestamp = jobFields[4]
 
 local meta = cmsgpack.unpack(ARGV[4])
+if sourceTimestamp then
+  meta["originalTimestamp"] = tonumber(sourceTimestamp)
+end
 
 local dataTable = cjson.decode(originalData or "{}")
 dataTable["_dlqMeta"] = meta
