@@ -36,10 +36,7 @@ import {
   RedisJobOptions,
   JobProgress,
 } from '../types';
-import {
-  GroupStateData,
-  GroupJobEntry,
-} from '../interfaces/group-options';
+import { GroupStateData, GroupJobEntry } from '../interfaces/group-options';
 import { CompensationMapping } from '../interfaces/group-job';
 import { ErrorCode } from '../enums';
 import {
@@ -1765,8 +1762,6 @@ export class Scripts {
    * Atomically creates a group metadata hash, adds to the groups index ZSET,
    * and records per-job statuses as 'pending'.
    * Called on a multi pipeline in addGroup().
-   *
-   * TODO(features): build KEYS and ARGV arrays and call execCommand('createGroup', ...)
    */
   async createGroup(
     client: RedisClient | ChainableCommander,
@@ -1777,15 +1772,31 @@ export class Scripts {
     compensationJson: string,
     fullJobKeys: string[],
   ): Promise<string> {
-    throw new Error('createGroup not yet implemented');
+    const prefix = (this.queue.opts as any)?.prefix || 'bull';
+    const groupHashKey = `${prefix}:${queueName}:groups:${groupId}`;
+    const groupJobsKey = `${prefix}:${queueName}:groups:${groupId}:jobs`;
+    const groupsIndexKey = `${prefix}:${queueName}:groups`;
+    const eventsKey = `${prefix}:${queueName}:events`;
+
+    const timestamp = Date.now();
+    const args = pack([
+      groupId,
+      groupName,
+      timestamp,
+      totalJobs,
+      compensationJson,
+      ...fullJobKeys,
+    ]);
+
+    const keys = [groupHashKey, groupJobsKey, groupsIndexKey, eventsKey, args];
+    return this.execCommand(client, 'createGroup', keys) as Promise<string>;
   }
 
   /**
    * Post-moveToFinished hook: updates job status in group, checks for terminal/compensating
    * state transition, and emits group events.
    *
-   * TODO(features): build KEYS/ARGV and call execCommand('updateGroupOnFinished', ...)
-   * Returns a structured result with action and compensation data.
+   * Returns structured result: action, groupState, completedJobsForCompensation.
    */
   async updateGroupOnFinished(
     client: RedisClient,
@@ -1794,6 +1805,7 @@ export class Scripts {
     fullJobKey: string,
     newStatus: 'completed' | 'failed',
     returnValue?: string,
+    failedJobId?: string,
   ): Promise<{
     action: 'none' | 'cancel_and_compensate';
     completedJobsForCompensation: Array<{
@@ -1803,13 +1815,50 @@ export class Scripts {
     }>;
     groupState: string;
   }> {
-    throw new Error('updateGroupOnFinished not yet implemented');
+    const prefix = (this.queue.opts as any)?.prefix || 'bull';
+    const groupHashKey = `${prefix}:${queueName}:groups:${groupId}`;
+    const groupJobsKey = `${prefix}:${queueName}:groups:${groupId}:jobs`;
+    const eventsKey = `${prefix}:${queueName}:events`;
+
+    const timestamp = Date.now();
+    const args = pack([
+      fullJobKey,
+      newStatus,
+      timestamp,
+      returnValue || '',
+      failedJobId || '',
+    ]);
+
+    const keys = [groupHashKey, groupJobsKey, eventsKey, args];
+    const result = (await this.execCommand(
+      client,
+      'updateGroupOnFinished',
+      keys,
+    )) as [string, string, string];
+
+    const action = result[0] as string as 'none' | 'cancel_and_compensate';
+    const groupState = result[1] as string;
+    const completedJobsJson = result[2] as string;
+
+    let completedJobsForCompensation: Array<{
+      fullJobKey: string;
+      jobName: string;
+      returnValue: string;
+    }> = [];
+    if (completedJobsJson && completedJobsJson !== '[]') {
+      try {
+        completedJobsForCompensation = JSON.parse(completedJobsJson);
+      } catch {
+        completedJobsForCompensation = [];
+      }
+    }
+
+    return { action, groupState, completedJobsForCompensation };
   }
 
   /**
    * Cancels all pending/waiting/delayed/prioritized group jobs and updates group state.
-   *
-   * TODO(features): build KEYS/ARGV and call execCommand('cancelGroupJobs', ...)
+   * Returns error code on invalid state, or cancelled count and completed jobs on success.
    */
   async cancelGroupJobs(
     client: RedisClient,
@@ -1824,13 +1873,44 @@ export class Scripts {
     }>;
     error?: number;
   }> {
-    throw new Error('cancelGroupJobs not yet implemented');
+    const prefix = (this.queue.opts as any)?.prefix || 'bull';
+    const groupHashKey = `${prefix}:${queueName}:groups:${groupId}`;
+    const groupJobsKey = `${prefix}:${queueName}:groups:${groupId}:jobs`;
+    const eventsKey = `${prefix}:${queueName}:events`;
+
+    const timestamp = Date.now();
+    const args = pack([timestamp]);
+
+    const keys = [groupHashKey, groupJobsKey, eventsKey, args];
+    const result = await this.execCommand(client, 'cancelGroupJobs', keys);
+
+    if (typeof result === 'number') {
+      return { cancelled: 0, completedJobsForCompensation: [], error: result };
+    }
+
+    const resultArr = result as [number, string];
+    const cancelled = resultArr[0] as number;
+    const completedJobsJson = resultArr[1] as string;
+
+    let completedJobsForCompensation: Array<{
+      fullJobKey: string;
+      jobName: string;
+      returnValue: string;
+    }> = [];
+    if (completedJobsJson && completedJobsJson !== '[]') {
+      try {
+        completedJobsForCompensation = JSON.parse(completedJobsJson);
+      } catch {
+        completedJobsForCompensation = [];
+      }
+    }
+
+    return { cancelled, completedJobsForCompensation };
   }
 
   /**
    * Enqueues compensation jobs into the compensation queue's wait list.
-   *
-   * TODO(features): build KEYS/ARGV and call execCommand('triggerCompensation', ...)
+   * Only enqueues compensation jobs for completed jobs that have a matching compensation definition.
    */
   async triggerCompensation(
     client: RedisClient,
@@ -1842,28 +1922,97 @@ export class Scripts {
     }>,
     compensation: CompensationMapping,
     groupId: string,
+    groupQueueName: string,
   ): Promise<number> {
-    throw new Error('triggerCompensation not yet implemented');
+    const prefix = (this.queue.opts as any)?.prefix || 'bull';
+    const compWaitKey = `${prefix}:${compensationQueueName}:wait`;
+    const compMetaKey = `${prefix}:${compensationQueueName}:meta`;
+    const compEventsKey = `${prefix}:${compensationQueueName}:events`;
+
+    const jobEntries: Array<[string, string, string]> = [];
+    for (const completedJob of completedJobs) {
+      const compensationDef = compensation[completedJob.jobName];
+      if (!compensationDef) {
+        continue;
+      }
+
+      const originalJobId = completedJob.fullJobKey.split(':').pop() || '';
+      const jobDataJson = JSON.stringify({
+        groupId,
+        groupQueueName,
+        originalJobName: completedJob.jobName,
+        originalJobId,
+        originalReturnValue: (() => {
+          try {
+            return JSON.parse(completedJob.returnValue);
+          } catch {
+            return completedJob.returnValue;
+          }
+        })(),
+        compensationData: compensationDef.data,
+      });
+
+      const jobOptsJson = JSON.stringify({
+        attempts: compensationDef.opts?.attempts ?? 3,
+        backoff: compensationDef.opts?.backoff ?? {
+          type: 'exponential',
+          delay: 1000,
+        },
+      });
+
+      jobEntries.push([compensationDef.name, jobDataJson, jobOptsJson]);
+    }
+
+    if (jobEntries.length === 0) {
+      return 0;
+    }
+
+    const args = pack(jobEntries);
+    const keys = [compWaitKey, compMetaKey, compEventsKey, args];
+    const result = await this.execCommand(client, 'triggerCompensation', keys);
+    return result as number;
   }
 
   /**
    * Reads group metadata hash and returns a GroupStateData object, or null if not found.
-   *
-   * TODO(features): build KEYS/ARGV and call execCommand('getGroupState', ...)
    */
   async getGroupState(
     client: RedisClient,
     queueName: string,
     groupId: string,
   ): Promise<GroupStateData | null> {
-    throw new Error('getGroupState not yet implemented');
+    const prefix = (this.queue.opts as any)?.prefix || 'bull';
+    const groupHashKey = `${prefix}:${queueName}:groups:${groupId}`;
+
+    const keys = [groupHashKey];
+    const result = await this.execCommand(client, 'getGroupState', keys);
+
+    if (!result) {
+      return null;
+    }
+
+    const raw = result as string[];
+    const obj: Record<string, string> = {};
+    for (let i = 0; i < raw.length; i += 2) {
+      obj[raw[i]] = raw[i + 1];
+    }
+
+    return {
+      id: groupId,
+      name: obj.name || '',
+      state: (obj.state || 'ACTIVE') as GroupStateData['state'],
+      createdAt: parseInt(obj.createdAt, 10) || 0,
+      updatedAt: parseInt(obj.updatedAt, 10) || 0,
+      totalJobs: parseInt(obj.totalJobs, 10) || 0,
+      completedCount: parseInt(obj.completedCount, 10) || 0,
+      failedCount: parseInt(obj.failedCount, 10) || 0,
+      cancelledCount: parseInt(obj.cancelledCount, 10) || 0,
+    };
   }
 
   /**
    * Tracks completion of a compensation job. Transitions group to FAILED or FAILED_COMPENSATION
    * when all compensations are done.
-   *
-   * TODO(features): build KEYS/ARGV and call execCommand('updateGroupCompensation', ...)
    */
   async updateGroupCompensation(
     client: RedisClient,
@@ -1875,7 +2024,24 @@ export class Scripts {
     groupState: string;
     allDone: boolean;
   }> {
-    throw new Error('updateGroupCompensation not yet implemented');
+    const prefix = (this.queue.opts as any)?.prefix || 'bull';
+    const groupHashKey = `${prefix}:${queueName}:groups:${groupId}`;
+    const eventsKey = `${prefix}:${queueName}:events`;
+
+    const timestamp = Date.now();
+    const args = pack([groupId, finalStatus, timestamp]);
+
+    const keys = [groupHashKey, eventsKey, args];
+    const result = (await this.execCommand(
+      client,
+      'updateGroupCompensation',
+      keys,
+    )) as [string, number];
+
+    return {
+      groupState: result[0] as string,
+      allDone: result[1] === 1,
+    };
   }
 
   finishedErrors({

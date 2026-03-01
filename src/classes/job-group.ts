@@ -1,62 +1,65 @@
 import { GroupJobEntry, GroupStateData } from '../interfaces/group-options';
-import { ScriptQueueContext } from '../interfaces';
+import { GroupState } from '../types/group-state';
 
 /**
  * JobGroup
  *
- * Represents a transactional saga group of independent jobs.
- * Provides query access to group state and membership stored in Redis.
- *
- * This class is used internally by Queue methods (getGroupState, getGroupJobs, cancelGroup)
- * and exposes a typed view over the Redis hash data.
+ * Provides static utility methods for parsing Redis HGETALL flat arrays
+ * into typed GroupStateData and GroupJobEntry[] objects.
  */
 export class JobGroup {
-  constructor(
-    public readonly groupId: string,
-    public readonly queueName: string,
-    protected readonly queue: ScriptQueueContext,
-  ) {}
-
-  /**
-   * Returns the current group state metadata from Redis.
-   * Returns null if the group does not exist.
-   *
-   * TODO(features): delegate to Scripts.getGroupState()
-   */
-  async getState(): Promise<GroupStateData | null> {
-    throw new Error('Not implemented');
-  }
-
-  /**
-   * Returns all member jobs with their current statuses in this group.
-   *
-   * TODO(features): delegate to Scripts.getGroupJobs() or direct HGETALL
-   */
-  async getJobs(): Promise<GroupJobEntry[]> {
-    throw new Error('Not implemented');
-  }
-
   /**
    * Parses the flat HGETALL result array from Redis into a GroupStateData object.
-   *
-   * TODO(features): implement field mapping
+   * The flat array alternates field names and values: [field, value, field, value, ...]
    */
-  static fromRaw(
-    groupId: string,
-    raw: string[],
-  ): GroupStateData {
-    throw new Error('Not implemented');
+  static fromRaw(groupId: string, raw: string[]): GroupStateData {
+    const obj: Record<string, string> = {};
+    for (let i = 0; i < raw.length; i += 2) {
+      obj[raw[i]] = raw[i + 1];
+    }
+
+    return {
+      id: groupId,
+      name: obj.name || '',
+      state: (obj.state || 'ACTIVE') as Exclude<GroupState, 'PENDING'>,
+      createdAt: parseInt(obj.createdAt, 10) || 0,
+      updatedAt: parseInt(obj.updatedAt, 10) || 0,
+      totalJobs: parseInt(obj.totalJobs, 10) || 0,
+      completedCount: parseInt(obj.completedCount, 10) || 0,
+      failedCount: parseInt(obj.failedCount, 10) || 0,
+      cancelledCount: parseInt(obj.cancelledCount, 10) || 0,
+    };
   }
 
   /**
    * Parses the HGETALL result of the group jobs hash into GroupJobEntry array.
-   *
-   * TODO(features): implement jobKey parsing (prefix:queueName:jobId)
+   * Each entry in the flat array is: fullJobKey, status, fullJobKey, status, ...
+   * fullJobKey format: prefix:queueName:jobId
    */
-  static jobsFromRaw(
-    raw: string[],
-    prefix: string,
-  ): GroupJobEntry[] {
-    throw new Error('Not implemented');
+  static jobsFromRaw(raw: string[], prefix: string): GroupJobEntry[] {
+    const entries: GroupJobEntry[] = [];
+    for (let i = 0; i < raw.length; i += 2) {
+      const fullJobKey = raw[i];
+      const status = raw[i + 1] as GroupJobEntry['status'];
+
+      // Parse {prefix}:{queueName}:{jobId} — jobId is the last segment
+      const lastColon = fullJobKey.lastIndexOf(':');
+      const jobId = fullJobKey.substring(lastColon + 1);
+      const queueBase = fullJobKey.substring(0, lastColon);
+
+      // queueBase = {prefix}:{queueName}, extract queueName by removing prefix
+      const prefixWithColon = `${prefix}:`;
+      const queueName = queueBase.startsWith(prefixWithColon)
+        ? queueBase.substring(prefixWithColon.length)
+        : queueBase;
+
+      entries.push({
+        jobId,
+        jobKey: fullJobKey,
+        status,
+        queueName,
+      });
+    }
+    return entries;
   }
 }

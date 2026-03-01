@@ -12,11 +12,9 @@ import {
   Tracer,
   ContextManager,
 } from '../interfaces';
-import {
-  GroupOptions,
-  GroupNode,
-} from '../interfaces/group-options';
+import { GroupOptions, GroupNode } from '../interfaces/group-options';
 import { getParentKey, isRedisInstance, trace } from '../utils';
+import { createScripts } from '../utils/create-scripts';
 import { Job } from './job';
 import { KeysMap, QueueKeys } from './queue-keys';
 import { RedisConnection } from './redis-connection';
@@ -269,15 +267,89 @@ export class FlowProducer extends EventEmitter {
     }
 
     for (const job of jobs) {
-      if (job.opts?.parent) {
+      if ((job.opts as any)?.parent) {
         throw new Error('A job cannot belong to both a group and a flow');
       }
     }
 
-    // TODO(features): generate groupId, build multi pipeline, call createGroup-4.lua,
-    // add each job with group metadata injected into opts, exec pipeline, and
-    // return GroupNode with all created Job instances.
-    throw new Error('addGroup not yet implemented');
+    const groupId = v4();
+    const groupOwnerQueueName = jobs[0].queueName;
+    const prefix = this.opts.prefix || 'bull';
+    const client = await this.connection.client;
+    const multi = client.multi();
+
+    // Build Scripts instance for the group owner queue
+    const ownerQueueKeys = this.queueKeys.getKeys(groupOwnerQueueName);
+    const minimalOwnerQueue = {
+      keys: ownerQueueKeys,
+      get client() {
+        return Promise.resolve(client);
+      },
+      toKey: (type: string) => this.queueKeys.toKey(groupOwnerQueueName, type),
+      opts: { prefix, connection: {} },
+      qualifiedName: this.queueKeys.getQueueQualifiedName(groupOwnerQueueName),
+      closing: this.closing,
+      waitUntilReady: async () => client,
+      removeListener: this.removeListener.bind(this) as any,
+      emit: this.emit.bind(this) as any,
+      on: this.on.bind(this) as any,
+      get redisVersion() {
+        return (this as any)._connection?.redisVersion || '';
+      },
+      get databaseType() {
+        return (this as any)._connection?.databaseType;
+      },
+    } as any;
+
+    const ownerScripts = createScripts(minimalOwnerQueue);
+
+    // Create Job instances (with group opts injected) and compute fullJobKeys
+    const groupJobInstances: Job[] = [];
+    const fullJobKeys: string[] = [];
+
+    for (const jobDef of jobs) {
+      const jobQueueName = jobDef.queueName;
+      const jobQueue = this.queueFromNode(
+        { queueName: jobQueueName },
+        new QueueKeys(prefix),
+        prefix,
+      );
+      const jobId = (jobDef.opts as any)?.jobId || v4();
+      const jobInstance = new this.Job(
+        jobQueue as any,
+        jobDef.name,
+        jobDef.data,
+        {
+          ...(jobDef.opts || {}),
+          group: { id: groupId, name },
+        },
+        jobId,
+      );
+      const fullJobKey = `${prefix}:${jobQueueName}:${jobId}`;
+      fullJobKeys.push(fullJobKey);
+      groupJobInstances.push(jobInstance);
+    }
+
+    // Call createGroup Lua on the pipeline
+    const compensationJson = compensation ? JSON.stringify(compensation) : '{}';
+    await ownerScripts.createGroup(
+      multi as any,
+      groupOwnerQueueName,
+      groupId,
+      name,
+      jobs.length,
+      compensationJson,
+      fullJobKeys,
+    );
+
+    // Add each job to its queue on the same pipeline
+    for (const jobInstance of groupJobInstances) {
+      await jobInstance.addJob(multi as unknown as Redis, {});
+    }
+
+    await multi.exec();
+
+    return { groupId, groupName: name, jobs: groupJobInstances };
   }
 
   /**

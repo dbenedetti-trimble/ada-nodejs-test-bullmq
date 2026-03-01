@@ -9,12 +9,7 @@ import {
   expect,
 } from 'vitest';
 import { v4 } from 'uuid';
-import {
-  FlowProducer,
-  Queue,
-  Worker,
-  QueueEvents,
-} from '../src/classes';
+import { FlowProducer, Queue, Worker, QueueEvents } from '../src/classes';
 import { removeAllQueueData } from '../src/utils';
 
 describe('JobGroup - creation', () => {
@@ -47,7 +42,7 @@ describe('JobGroup - creation', () => {
   });
 
   // VAL-01: Happy path group creation
-  it('addGroup returns GroupNode with groupId and Job instances; group hash exists in Redis with state ACTIVE', async () => {
+  it('addGroup returns GroupNode with groupId and Job instances; group hash is ACTIVE', async () => {
     // TODO(features): implement
   });
 
@@ -70,7 +65,9 @@ describe('JobGroup - creation', () => {
           'nonexistent-job': { name: 'compensate-a', data: {} },
         },
       }),
-    ).rejects.toThrow('Compensation key "nonexistent-job" does not match any job name');
+    ).rejects.toThrow(
+      'Compensation key "nonexistent-job" does not match any job name',
+    );
   });
 
   // VAL-18: Job with opts.parent set throws validation error

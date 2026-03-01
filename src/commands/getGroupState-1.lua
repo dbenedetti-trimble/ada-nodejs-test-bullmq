@@ -8,9 +8,6 @@
     Flat array from HGETALL (field, value, field, value, ...) or nil if not found.
 ]]
 
--- TODO(features): implement HGETALL and nil-check
--- Stub returns nil for scaffold.
-
 local rcall = redis.call
 
 local exists = rcall("EXISTS", KEYS[1])

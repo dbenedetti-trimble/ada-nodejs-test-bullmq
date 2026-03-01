@@ -1079,18 +1079,66 @@ will never work with more accuracy than 1ms. */
         fetchNextCallback() && !(this.closing || this.paused),
       );
 
-      // TODO(features): add group post-finish hook here
-      // if (job.opts.group?.id) {
-      //   const client = await this.client;
-      //   const groupResult = await this.scripts.updateGroupOnFinished(
-      //     client, job.queueName, job.opts.group.id, fullJobKey, 'completed', stringifiedResult);
-      //   if (groupResult.action === 'cancel_and_compensate') {
-      //     await this.scripts.cancelGroupJobs(client, job.queueName, job.opts.group.id);
-      //     if (groupResult.completedJobsForCompensation.length > 0) {
-      //       await this.scripts.triggerCompensation(client, ..., groupResult.completedJobsForCompensation, ...);
-      //     }
-      //   }
-      // }
+      if (job.opts.group?.id) {
+        try {
+          const groupClient = await this.client;
+          const fullJobKey = this.toKey(job.id);
+          const returnValueStr = JSON.stringify(result);
+          const groupResult = await this.scripts.updateGroupOnFinished(
+            groupClient,
+            job.queueName,
+            job.opts.group.id,
+            fullJobKey,
+            'completed',
+            returnValueStr,
+          );
+          if (groupResult.action === 'cancel_and_compensate') {
+            await this.scripts.cancelGroupJobs(
+              groupClient,
+              job.queueName,
+              job.opts.group.id,
+            );
+            if (groupResult.completedJobsForCompensation.length > 0) {
+              const prefix = (this.opts as any)?.prefix || 'bull';
+              const groupHashKey = `${prefix}:${job.queueName}:groups:${job.opts.group.id}`;
+              const compensationRaw = await groupClient.hget(
+                groupHashKey,
+                'compensation',
+              );
+              const compensation = compensationRaw
+                ? JSON.parse(compensationRaw)
+                : {};
+              const compensationQueueName = `${job.queueName}:compensation`;
+              await this.scripts.triggerCompensation(
+                groupClient,
+                compensationQueueName,
+                groupResult.completedJobsForCompensation,
+                compensation,
+                job.opts.group.id,
+                job.queueName,
+              );
+            }
+          }
+        } catch {
+          // Group hook errors should not fail the job processing
+        }
+      }
+
+      // If this is a compensation job, update the group compensation tracking
+      if ((job.data as any)?.groupId && (job.data as any)?.groupQueueName) {
+        try {
+          const groupClient = await this.client;
+          await this.scripts.updateGroupCompensation(
+            groupClient,
+            (job.data as any).groupQueueName,
+            (job.data as any).groupId,
+            this.toKey(job.id),
+            'completed',
+          );
+        } catch {
+          // Compensation tracking errors should not fail job processing
+        }
+      }
 
       this.emit('completed', job, result, 'active');
 
@@ -1144,18 +1192,74 @@ will never work with more accuracy than 1ms. */
         fetchNextCallback() && !(this.closing || this.paused),
       );
 
-      // TODO(features): add group post-finish hook here for failed jobs
-      // if (job.opts.group?.id && jobExhaustedRetries) {
-      //   const client = await this.client;
-      //   const groupResult = await this.scripts.updateGroupOnFinished(
-      //     client, job.queueName, job.opts.group.id, fullJobKey, 'failed');
-      //   if (groupResult.action === 'cancel_and_compensate') {
-      //     await this.scripts.cancelGroupJobs(client, job.queueName, job.opts.group.id);
-      //     if (groupResult.completedJobsForCompensation.length > 0) {
-      //       await this.scripts.triggerCompensation(client, ..., groupResult.completedJobsForCompensation, ...);
-      //     }
-      //   }
-      // }
+      if (job.opts.group?.id) {
+        const maxAttempts = job.opts.attempts || 1;
+        const retriesExhausted = job.attemptsMade >= maxAttempts;
+        if (retriesExhausted) {
+          try {
+            const groupClient = await this.client;
+            const fullJobKey = this.toKey(job.id);
+            const groupResult = await this.scripts.updateGroupOnFinished(
+              groupClient,
+              job.queueName,
+              job.opts.group.id,
+              fullJobKey,
+              'failed',
+              '',
+              job.id,
+            );
+            if (groupResult.action === 'cancel_and_compensate') {
+              await this.scripts.cancelGroupJobs(
+                groupClient,
+                job.queueName,
+                job.opts.group.id,
+              );
+              if (groupResult.completedJobsForCompensation.length > 0) {
+                const prefix = (this.opts as any)?.prefix || 'bull';
+                const groupHashKey = `${prefix}:${job.queueName}:groups:${job.opts.group.id}`;
+                const compensationRaw = await groupClient.hget(
+                  groupHashKey,
+                  'compensation',
+                );
+                const compensation = compensationRaw
+                  ? JSON.parse(compensationRaw)
+                  : {};
+                const compensationQueueName = `${job.queueName}:compensation`;
+                await this.scripts.triggerCompensation(
+                  groupClient,
+                  compensationQueueName,
+                  groupResult.completedJobsForCompensation,
+                  compensation,
+                  job.opts.group.id,
+                  job.queueName,
+                );
+              }
+            }
+          } catch {
+            // Group hook errors should not fail the job processing
+          }
+        }
+      }
+
+      // If this is a compensation job that exhausted retries, update group compensation
+      if ((job.data as any)?.groupId && (job.data as any)?.groupQueueName) {
+        const maxAttempts = job.opts.attempts || 1;
+        const retriesExhausted = job.attemptsMade >= maxAttempts;
+        if (retriesExhausted) {
+          try {
+            const groupClient = await this.client;
+            await this.scripts.updateGroupCompensation(
+              groupClient,
+              (job.data as any).groupQueueName,
+              (job.data as any).groupId,
+              this.toKey(job.id),
+              'failed',
+            );
+          } catch {
+            // Compensation tracking errors should not fail job processing
+          }
+        }
+      }
 
       this.emit('failed', job, err, 'active');
 

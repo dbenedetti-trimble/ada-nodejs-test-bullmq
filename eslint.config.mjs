@@ -41,6 +41,7 @@ export default defineConfig([
     'docs/gitbook/api',
     'docs/gitbook/changelog.md',
     'docs/gitbook/bullmq-pro/changelog.md',
+    'src/scripts',
   ]),
   {
     extends: compat.extends(

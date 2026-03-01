@@ -1,4 +1,3 @@
-import { Job } from '../classes/job';
 import { GroupState } from '../types/group-state';
 import { CompensationMapping, GroupJobDefinition } from './group-job';
 
@@ -11,7 +10,8 @@ export interface GroupOptions {
 export interface GroupNode {
   groupId: string;
   groupName: string;
-  jobs: Job[];
+  // Typed as any[] to avoid circular dependency; actual runtime type is Job[]
+  jobs: any[];
 }
 
 export interface GroupStateData {
