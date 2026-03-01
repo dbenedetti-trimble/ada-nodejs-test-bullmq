@@ -1115,16 +1115,125 @@ will never work with more accuracy than 1ms. */
     if (!job.opts?.group) {
       return;
     }
-    // TODO(features): implement group post-processing hook
-    // 1. client = await this.client
-    // 2. [action, completedJobsJson] = await this.scripts.updateGroupOnFinished(
-    //      client, job.opts.group.id, job.opts.group.queueName,
-    //      job.toKey(job.id), status, Date.now(), JSON.stringify(returnValue))
-    // 3. If action == "trigger-compensation":
-    //      await this.scripts.cancelGroupJobs(client, groupId, ownerQueueName, Date.now())
-    //      Build compensation descriptors from completedJobsJson + compensation mapping
-    //      await this.scripts.triggerCompensation(client, compensationQueueName, packedDescriptors)
-    // 4. If action == "completed": no extra work (event already emitted by Lua)
+
+    const group = job.opts.group;
+
+    if (group.isCompensation) {
+      if (status === 'failed' && !job.finishedOn) {
+        return;
+      }
+      const client = await this.client;
+      const result = status === 'completed' ? 'success' : 'failure';
+      const jobPrefix = (this.opts as any).prefix || 'bull';
+      const jobKey = `${jobPrefix}:${this.name}:${job.id}`;
+      await this.scripts.updateGroupCompensation(
+        client,
+        group.id,
+        group.queueName,
+        jobKey,
+        result,
+        Date.now(),
+      );
+      return;
+    }
+
+    if (status === 'failed' && !job.finishedOn) {
+      return;
+    }
+
+    const client = await this.client;
+    const jobPrefix = (this.opts as any).prefix || 'bull';
+    const jobKey = `${jobPrefix}:${this.name}:${job.id}`;
+    const returnValueJson =
+      typeof returnValue !== 'undefined' ? JSON.stringify(returnValue) : 'null';
+
+    const [action, completedJobsJson] =
+      await this.scripts.updateGroupOnFinished(
+        client,
+        group.id,
+        group.queueName,
+        jobKey,
+        status,
+        Date.now(),
+        returnValueJson,
+      );
+
+    if (action === 'trigger-compensation') {
+      const prefix = (this.opts as any).prefix || 'bull';
+      const groupHashKey = `${prefix}:${group.queueName}:groups:${group.id}`;
+      const compensationJson = await client.hget(groupHashKey, 'compensation');
+      const compensationMapping = JSON.parse(compensationJson || '{}');
+
+      type CompletedJobEntry = {
+        jobKey: string;
+        jobName: string;
+        returnValue: string;
+        jobId: string;
+      };
+      const completedJobs: CompletedJobEntry[] = JSON.parse(
+        completedJobsJson || '[]',
+      );
+
+      await this.scripts.cancelGroupJobs(
+        client,
+        group.id,
+        group.queueName,
+        Date.now(),
+      );
+
+      const descriptors = completedJobs
+        .filter(j => compensationMapping[j.jobName])
+        .map(j => {
+          const compDef = compensationMapping[j.jobName];
+          return {
+            jobName: compDef.name,
+            groupId: group.id,
+            groupName: group.name,
+            ownerQueueName: group.queueName,
+            originalJobName: j.jobName,
+            originalJobId: j.jobId,
+            originalReturnValue: j.returnValue,
+            compensationData: compDef.data,
+            attempts: compDef.opts?.attempts ?? 3,
+            backoff: compDef.opts?.backoff,
+          };
+        });
+
+      if (descriptors.length > 0) {
+        const { Packr } = await import('msgpackr');
+        const packer = new Packr({
+          useRecords: false,
+          encodeUndefinedAsNil: true,
+        });
+        const packed = packer.pack(descriptors);
+        await this.scripts.triggerCompensation(
+          client,
+          `${group.queueName}:compensation`,
+          packed,
+          groupHashKey,
+        );
+      } else {
+        await (client as any).hset(
+          groupHashKey,
+          'state',
+          'FAILED',
+          'updatedAt',
+          Date.now(),
+        );
+        await (client as any).xadd(
+          `${prefix}:${group.queueName}:events`,
+          '*',
+          'event',
+          'group:failed',
+          'groupId',
+          group.id,
+          'groupName',
+          group.name,
+          'state',
+          'FAILED',
+        );
+      }
+    }
   }
 
   protected async handleFailed(

@@ -116,5 +116,6 @@ export interface BaseJobOptions extends DefaultJobOptions {
     id: string;
     name: string;
     queueName: string;
+    isCompensation?: boolean;
   };
 }

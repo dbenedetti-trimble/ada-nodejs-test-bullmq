@@ -2,7 +2,7 @@
   Atomically creates a job group in Redis.
 
   Sets up group metadata hash, per-job status hash, and groups index ZSET.
-  Transitions group state from PENDING to ACTIVE as part of creation.
+  Transitions group state to ACTIVE as part of creation.
 
   Input:
     KEYS[1] group hash key        ({prefix}:{queueName}:groups:{groupId})
@@ -21,11 +21,49 @@
     group ID on success
 ]]
 
--- TODO(features): implement atomic group creation
--- Steps:
---   1. HSET group metadata (name, state=ACTIVE, createdAt, updatedAt, totalJobs, completedCount=0, failedCount=0, cancelledCount=0, compensation)
---   2. ZADD groups index with score=timestamp, member=groupId
---   3. For each job key in ARGV[6..N], HSET group jobs hash: jobKey = "pending"
---   4. XADD event stream: group:created event
+local groupHashKey = KEYS[1]
+local groupJobsKey = KEYS[2]
+local groupsIndexKey = KEYS[3]
+local eventsKey = KEYS[4]
 
-return ARGV[1]
+local groupId = ARGV[1]
+local groupName = ARGV[2]
+local timestamp = ARGV[3]
+local totalJobs = ARGV[4]
+local compensationJson = ARGV[5]
+
+local rcall = redis.call
+
+-- 1. HSET group metadata
+rcall("HSET", groupHashKey,
+  "id", groupId,
+  "name", groupName,
+  "state", "ACTIVE",
+  "createdAt", timestamp,
+  "updatedAt", timestamp,
+  "totalJobs", totalJobs,
+  "completedCount", 0,
+  "failedCount", 0,
+  "cancelledCount", 0,
+  "totalCompensations", 0,
+  "completedCompensations", 0,
+  "failedCompensations", 0,
+  "compensation", compensationJson
+)
+
+-- 2. ZADD groups index with score=timestamp, member=groupId
+rcall("ZADD", groupsIndexKey, timestamp, groupId)
+
+-- 3. For each job key in ARGV[6..N], HSET group jobs hash: jobKey = "pending"
+for i = 6, #ARGV do
+  rcall("HSET", groupJobsKey, ARGV[i], "pending")
+end
+
+-- 4. XADD event stream: group:created event
+rcall("XADD", eventsKey, "*",
+  "event", "group:created",
+  "groupId", groupId,
+  "groupName", groupName
+)
+
+return groupId

@@ -1776,11 +1776,21 @@ export class Scripts {
     compensationJson: string,
     jobKeys: string[],
   ): Promise<string> | ChainableCommander {
-    // TODO(features): implement
-    // Build KEYS array: [groupHashKey, groupJobsKey, groupsIndexKey, eventsKey]
-    // Build ARGV array: [groupId, groupName, timestamp, totalJobs, compensationJson, ...jobKeys]
-    // Call execCommand(client, 'createGroup', [...keys, ...argv])
-    throw new Error('Not implemented');
+    const keys = [
+      this.queue.toKey(`groups:${groupId}`),
+      this.queue.toKey(`groups:${groupId}:jobs`),
+      this.queue.toKey('groups'),
+      this.queue.keys.events,
+    ];
+    const argv = [
+      groupId,
+      groupName,
+      timestamp,
+      totalJobs,
+      compensationJson,
+      ...jobKeys,
+    ];
+    return this.execCommand(client, 'createGroup', keys.concat(argv as any[]));
   }
 
   /**
@@ -1804,11 +1814,15 @@ export class Scripts {
     timestamp: number,
     returnValue: string,
   ): Promise<[string, string]> {
-    // TODO(features): implement
-    // Build KEYS array: [groupHashKey, groupJobsKey, eventsKey]
-    // Build ARGV array: [jobKey, status, timestamp, returnValue]
-    // Call execCommand(client, 'updateGroupOnFinished', [...keys, ...argv])
-    throw new Error('Not implemented');
+    const prefix = (this.queue.opts as any).prefix || 'bull';
+    const base = `${prefix}:${ownerQueueName}`;
+    const keys = [
+      `${base}:groups:${groupId}`,
+      `${base}:groups:${groupId}:jobs`,
+      `${base}:events`,
+    ];
+    const argv = [jobKey, status, timestamp, returnValue];
+    return this.execCommand(client, 'updateGroupOnFinished', keys.concat(argv as any[]));
   }
 
   /**
@@ -1825,9 +1839,16 @@ export class Scripts {
     groupId: string,
     ownerQueueName: string,
     timestamp: number,
-  ): Promise<number> {
-    // TODO(features): implement
-    throw new Error('Not implemented');
+  ): Promise<[number, number]> {
+    const prefix = (this.queue.opts as any).prefix || 'bull';
+    const base = `${prefix}:${ownerQueueName}`;
+    const keys = [
+      `${base}:groups:${groupId}`,
+      `${base}:groups:${groupId}:jobs`,
+      `${base}:events`,
+    ];
+    const argv = [timestamp, groupId];
+    return this.execCommand(client, 'cancelGroupJobs', keys.concat(argv as any[]));
   }
 
   /**
@@ -1842,9 +1863,17 @@ export class Scripts {
     client: RedisClient,
     compensationQueueName: string,
     compensationJobs: Buffer,
+    groupHashKey: string,
   ): Promise<number> {
-    // TODO(features): implement
-    throw new Error('Not implemented');
+    const prefix = (this.queue.opts as any).prefix || 'bull';
+    const base = `${prefix}:${compensationQueueName}`;
+    const keys = [
+      `${base}:wait`,
+      `${base}:meta`,
+      `${base}:events`,
+    ];
+    const argv: any[] = [compensationJobs, groupHashKey];
+    return this.execCommand(client, 'triggerCompensation', keys.concat(argv));
   }
 
   /**
@@ -1860,8 +1889,10 @@ export class Scripts {
     groupId: string,
     ownerQueueName: string,
   ): Promise<string[] | null> {
-    // TODO(features): implement
-    throw new Error('Not implemented');
+    const prefix = (this.queue.opts as any).prefix || 'bull';
+    const groupHashKey = `${prefix}:${ownerQueueName}:groups:${groupId}`;
+    const keys = [groupHashKey];
+    return this.execCommand(client, 'getGroupState', keys);
   }
 
   /**
@@ -1883,8 +1914,14 @@ export class Scripts {
     result: 'success' | 'failure',
     timestamp: number,
   ): Promise<string> {
-    // TODO(features): implement
-    throw new Error('Not implemented');
+    const prefix = (this.queue.opts as any).prefix || 'bull';
+    const base = `${prefix}:${ownerQueueName}`;
+    const keys = [
+      `${base}:groups:${groupId}`,
+      `${base}:events`,
+    ];
+    const argv = [compensationJobKey, result, timestamp];
+    return this.execCommand(client, 'updateGroupCompensation', keys.concat(argv as any[]));
   }
 
   finishedErrors({

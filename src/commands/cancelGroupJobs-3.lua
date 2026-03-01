@@ -14,21 +14,50 @@
     ARGV[2] group ID
 
   Output:
-    Number of jobs cancelled
+    Array: [cancelledCount, completedCount]
 ]]
 
--- TODO(features): implement pending job cancellation
--- Steps:
---   1. HGETALL group jobs hash to get all jobKey → status pairs
---   2. For each job with status "pending":
---        a. Parse jobKey to get prefix, queueName, jobId
---        b. Try LREM {prefix}:{queueName}:wait 0 {jobId}
---        c. Try ZREM {prefix}:{queueName}:delayed {jobId}
---        d. Try ZREM {prefix}:{queueName}:prioritized {jobId}
---        e. HSET group jobs hash: jobKey = "cancelled"
---        f. Increment cancelled counter
---   3. HINCRBY cancelledCount on group hash
---   4. HSET updatedAt on group hash
---   5. Return number cancelled
+local groupHashKey = KEYS[1]
+local groupJobsKey = KEYS[2]
+local eventsKey = KEYS[3]
 
-return 0
+local timestamp = ARGV[1]
+
+local rcall = redis.call
+
+-- 1. HGETALL group jobs hash to get all jobKey -> status pairs
+local allJobs = rcall("HGETALL", groupJobsKey)
+local cancelledCount = 0
+local completedCount = 0
+
+-- 2. For each job, cancel pending ones and count completed ones
+for i = 1, #allJobs, 2 do
+  local jobKey = allJobs[i]
+  local jobStatus = allJobs[i+1]
+
+  if jobStatus == "pending" then
+    local jobId = string.match(jobKey, ":([^:]+)$")
+    local baseKey = string.match(jobKey, "^(.+):[^:]+$")
+
+    if jobId and baseKey then
+      -- Try to remove from wait list, delayed ZSET, and prioritized ZSET
+      rcall("LREM", baseKey .. ":wait", 0, jobId)
+      rcall("ZREM", baseKey .. ":delayed", jobId)
+      rcall("ZREM", baseKey .. ":prioritized", jobId)
+    end
+
+    rcall("HSET", groupJobsKey, jobKey, "cancelled")
+    cancelledCount = cancelledCount + 1
+
+  elseif jobStatus == "completed" then
+    completedCount = completedCount + 1
+  end
+end
+
+-- 3. Update group hash counters
+if cancelledCount > 0 then
+  rcall("HINCRBY", groupHashKey, "cancelledCount", cancelledCount)
+  rcall("HSET", groupHashKey, "updatedAt", timestamp)
+end
+
+return {cancelledCount, completedCount}

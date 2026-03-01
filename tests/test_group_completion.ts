@@ -49,19 +49,162 @@ describe('JobGroup - Successful Completion (GRP-3)', () => {
 
   // VAL-04
   it('should transition group to COMPLETED when all jobs succeed', async () => {
-    // TODO(features): implement
+    const groupNode = await flowProducer.addGroup({
+      name: 'complete-group',
+      jobs: [
+        { name: 'job-a', queueName, data: {} },
+        { name: 'job-b', queueName, data: {} },
+      ],
+    });
+
+    let processedCount = 0;
+    worker = new Worker(
+      queueName,
+      async () => {
+        processedCount++;
+        return { done: true };
+      },
+      { connection, prefix },
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error('timeout waiting for completion')),
+        10000,
+      );
+      worker.on('completed', async () => {
+        if (processedCount >= 2) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+    });
+
+    // Allow the group hook to propagate
+    await new Promise(r => setTimeout(r, 500));
+
+    const state = await queue.getGroupState(groupNode.groupId);
+    expect(state!.state).toBe('COMPLETED');
+    expect(state!.completedCount).toBe(2);
   });
 
   // VAL-05
   it('should emit group:completed exactly once even with concurrent workers', async () => {
-    // TODO(features): implement
+    const groupNode = await flowProducer.addGroup({
+      name: 'concurrent-complete-group',
+      jobs: [
+        { name: 'job-a', queueName, data: {} },
+        { name: 'job-b', queueName, data: {} },
+      ],
+    });
+
+    const completedEvents: string[] = [];
+
+    const worker2 = new Worker(
+      queueName,
+      async () => ({ result: 'ok' }),
+      { connection: new IORedis(redisHost, { maxRetriesPerRequest: null }), prefix },
+    );
+    worker = new Worker(
+      queueName,
+      async () => ({ result: 'ok' }),
+      { connection: new IORedis(redisHost, { maxRetriesPerRequest: null }), prefix },
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      let completed = 0;
+      const timeout = setTimeout(
+        () => reject(new Error('timeout')),
+        10000,
+      );
+      const onCompleted = () => {
+        completed++;
+        if (completed >= 2) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      };
+      worker.on('completed', onCompleted);
+      worker2.on('completed', onCompleted);
+    });
+
+    await new Promise(r => setTimeout(r, 500));
+    await worker2.close();
+
+    const state = await queue.getGroupState(groupNode.groupId);
+    expect(state!.state).toBe('COMPLETED');
+
+    const prefix2 = prefix;
+    const eventsKey = `${prefix2}:${queueName}:events`;
+    const events = await connection.xrange(eventsKey, '-', '+');
+    const groupCompletedEvents = events.filter(([, fields]) => {
+      const idx = fields.indexOf('event');
+      return idx >= 0 && fields[idx + 1] === 'group:completed';
+    });
+    expect(groupCompletedEvents.length).toBe(1);
   });
 
   it('should set completedCount equal to totalJobs on completion', async () => {
-    // TODO(features): implement
+    const groupNode = await flowProducer.addGroup({
+      name: 'count-group',
+      jobs: [
+        { name: 'job-a', queueName, data: {} },
+        { name: 'job-b', queueName, data: {} },
+        { name: 'job-c', queueName, data: {} },
+      ],
+    });
+
+    let processed = 0;
+    worker = new Worker(queueName, async () => {
+      processed++;
+    }, { connection, prefix });
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('timeout')), 15000);
+      worker.on('completed', () => {
+        if (processed >= 3) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+    });
+
+    await new Promise(r => setTimeout(r, 500));
+
+    const state = await queue.getGroupState(groupNode.groupId);
+    expect(state!.completedCount).toBe(state!.totalJobs);
   });
 
   it('should emit group:completed event with groupId and groupName', async () => {
-    // TODO(features): implement
+    const groupNode = await flowProducer.addGroup({
+      name: 'event-group',
+      jobs: [{ name: 'job-a', queueName, data: {} }],
+    });
+
+    worker = new Worker(queueName, async () => 'done', { connection, prefix });
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('timeout')), 10000);
+      worker.on('completed', () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+
+    await new Promise(r => setTimeout(r, 500));
+
+    const eventsKey = `${prefix}:${queueName}:events`;
+    const events = await connection.xrange(eventsKey, '-', '+');
+    const groupCompleted = events.find(([, fields]) => {
+      const idx = fields.indexOf('event');
+      return idx >= 0 && fields[idx + 1] === 'group:completed';
+    });
+
+    expect(groupCompleted).toBeDefined();
+    const fields = groupCompleted![1];
+    const groupIdIdx = fields.indexOf('groupId');
+    expect(fields[groupIdIdx + 1]).toBe(groupNode.groupId);
+    const groupNameIdx = fields.indexOf('groupName');
+    expect(fields[groupNameIdx + 1]).toBe('event-group');
   });
 });

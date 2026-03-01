@@ -30,4 +30,5 @@ export interface GroupMembershipOpts {
   id: string;
   name: string;
   queueName: string;
+  isCompensation?: boolean;
 }

@@ -1,5 +1,6 @@
 import { RedisClient } from '../interfaces';
 import { GroupJobEntry, GroupStateResult } from '../interfaces/group-options';
+import { GroupStateValue } from '../types/group-state';
 
 /**
  * JobGroup
@@ -29,15 +30,44 @@ export class JobGroup {
    * Returns null if group does not exist.
    */
   async getState(): Promise<GroupStateResult | null> {
-    // TODO(features): implement via getGroupState-1.lua
-    throw new Error('Not implemented');
+    const raw = await (this.client as any).hgetall(this.groupKey);
+    if (!raw || Object.keys(raw).length === 0) {
+      return null;
+    }
+    return {
+      id: raw.id,
+      name: raw.name,
+      state: raw.state as GroupStateValue,
+      createdAt: parseInt(raw.createdAt, 10),
+      updatedAt: parseInt(raw.updatedAt, 10),
+      totalJobs: parseInt(raw.totalJobs, 10),
+      completedCount: parseInt(raw.completedCount, 10),
+      failedCount: parseInt(raw.failedCount, 10),
+      cancelledCount: parseInt(raw.cancelledCount, 10),
+    };
   }
 
   /**
    * Returns all job entries belonging to this group with their current statuses.
    */
   async getJobs(): Promise<GroupJobEntry[]> {
-    // TODO(features): implement via HGETALL on groupJobsKey
-    throw new Error('Not implemented');
+    const raw = await (this.client as any).hgetall(this.groupJobsKey);
+    if (!raw) {
+      return [];
+    }
+    return Object.entries(raw).map(([jobKey, status]) => {
+      const lastColon = jobKey.lastIndexOf(':');
+      const jobId = lastColon >= 0 ? jobKey.slice(lastColon + 1) : jobKey;
+      const base = lastColon >= 0 ? jobKey.slice(0, lastColon) : jobKey;
+      const secondColon = base.indexOf(':');
+      const queueName =
+        secondColon >= 0 ? base.slice(secondColon + 1) : base;
+      return {
+        jobId,
+        jobKey,
+        status: status as GroupJobEntry['status'],
+        queueName,
+      };
+    });
   }
 }

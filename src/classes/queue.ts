@@ -1067,11 +1067,26 @@ export class Queue<
    * @returns GroupStateResult or null if the group does not exist
    */
   async getGroupState(groupId: string): Promise<GroupStateResult | null> {
-    // TODO(features): implement via getGroupState-1.lua
-    // 1. Call scripts.getGroupState(groupId)
-    // 2. Parse returned flat array into GroupStateResult
-    // 3. Return null if group not found
-    throw new Error('Not implemented');
+    const client = await this.client;
+    const raw = await this.scripts.getGroupState(client, groupId, this.name);
+    if (!raw || raw.length === 0) {
+      return null;
+    }
+    const map: Record<string, string> = {};
+    for (let i = 0; i < raw.length; i += 2) {
+      map[raw[i]] = raw[i + 1];
+    }
+    return {
+      id: map.id,
+      name: map.name,
+      state: map.state as GroupStateResult['state'],
+      createdAt: parseInt(map.createdAt, 10),
+      updatedAt: parseInt(map.updatedAt, 10),
+      totalJobs: parseInt(map.totalJobs, 10),
+      completedCount: parseInt(map.completedCount, 10),
+      failedCount: parseInt(map.failedCount, 10),
+      cancelledCount: parseInt(map.cancelledCount, 10),
+    };
   }
 
   /**
@@ -1081,12 +1096,27 @@ export class Queue<
    * @returns Array of GroupJobEntry objects
    */
   async getGroupJobs(groupId: string): Promise<GroupJobEntry[]> {
-    // TODO(features): implement via HGETALL on group jobs hash
-    // 1. Build key: {prefix}:{queueName}:groups:{groupId}:jobs
-    // 2. HGETALL key
-    // 3. Parse each field (jobKey) to extract queueName and jobId
-    // 4. Return array of GroupJobEntry
-    throw new Error('Not implemented');
+    const client = await this.client;
+    const prefix = (this.opts as any).prefix || 'bull';
+    const groupJobsKey = `${prefix}:${this.name}:groups:${groupId}:jobs`;
+    const raw = await client.hgetall(groupJobsKey);
+    if (!raw) {
+      return [];
+    }
+    return Object.entries(raw).map(([jobKey, status]) => {
+      const lastColon = jobKey.lastIndexOf(':');
+      const jobId = lastColon >= 0 ? jobKey.slice(lastColon + 1) : jobKey;
+      const base = lastColon >= 0 ? jobKey.slice(0, lastColon) : jobKey;
+      const secondColon = base.indexOf(':');
+      const queueName =
+        secondColon >= 0 ? base.slice(secondColon + 1) : base;
+      return {
+        jobId,
+        jobKey,
+        status: status as GroupJobEntry['status'],
+        queueName,
+      };
+    });
   }
 
   /**
@@ -1099,12 +1129,103 @@ export class Queue<
    * @param groupId - The group identifier returned from addGroup()
    */
   async cancelGroup(groupId: string): Promise<void> {
-    // TODO(features): implement
-    // 1. Call getGroupState(groupId) — throw GroupNotFoundError if null
-    // 2. If state != "ACTIVE", throw InvalidGroupStateError
-    // 3. Call cancelGroupJobs-3.lua
-    // 4. If completed jobs exist, call triggerCompensation-3.lua
-    // 5. Emit group:compensating or group:failed event as appropriate
-    throw new Error('Not implemented');
+    const groupState = await this.getGroupState(groupId);
+    if (!groupState) {
+      throw new GroupNotFoundError(groupId);
+    }
+    if (groupState.state !== 'ACTIVE') {
+      throw new InvalidGroupStateError(groupId, groupState.state, 'cancelGroup');
+    }
+
+    const client = await this.client;
+    const prefix = (this.opts as any).prefix || 'bull';
+    const timestamp = Date.now();
+
+    const [, completedCount] = await this.scripts.cancelGroupJobs(
+      client,
+      groupId,
+      this.name,
+      timestamp,
+    );
+
+    if (completedCount > 0) {
+      const groupJobsRaw = await this.getGroupJobs(groupId);
+      const completedJobs = groupJobsRaw.filter(j => j.status === 'completed');
+
+      const groupHashKey = `${prefix}:${this.name}:groups:${groupId}`;
+      const compensationJson = await client.hget(groupHashKey, 'compensation');
+      const compensationMapping = JSON.parse(compensationJson || '{}');
+      const groupName = groupState.name;
+
+      const { Packr } = await import('msgpackr');
+      const packer = new Packr({ useRecords: false, encodeUndefinedAsNil: true });
+
+      const descriptors = completedJobs
+        .filter(j => {
+          const lastColon = j.jobKey.lastIndexOf(':');
+          const base = j.jobKey.slice(0, lastColon);
+          const secondColon = base.indexOf(':');
+          const jQueueName = secondColon >= 0 ? base.slice(secondColon + 1) : base;
+          return compensationMapping[jQueueName] !== undefined ||
+            compensationMapping[j.jobId] !== undefined;
+        })
+        .map(j => {
+          const lastColon = j.jobKey.lastIndexOf(':');
+          const base = j.jobKey.slice(0, lastColon);
+          const secondColon = base.indexOf(':');
+          const jQueueName = secondColon >= 0 ? base.slice(secondColon + 1) : base;
+          const compDef = compensationMapping[jQueueName] || compensationMapping[j.jobId];
+          return {
+            jobName: compDef?.name || `compensate-${j.jobId}`,
+            groupId,
+            groupName,
+            ownerQueueName: this.name,
+            originalJobName: j.queueName,
+            originalJobId: j.jobId,
+            originalReturnValue: null as string | null,
+            compensationData: compDef?.data,
+            attempts: compDef?.opts?.attempts ?? 3,
+            backoff: compDef?.opts?.backoff,
+          };
+        });
+
+      if (descriptors.length > 0) {
+        const packed = packer.pack(descriptors);
+        await this.scripts.triggerCompensation(
+          client,
+          `${this.name}:compensation`,
+          packed,
+          groupHashKey,
+        );
+      } else {
+        await client.hset(groupHashKey,
+          'state', 'FAILED',
+          'updatedAt', timestamp,
+        );
+        await client.xadd(
+          `${prefix}:${this.name}:events`,
+          '*',
+          'event', 'group:failed',
+          'groupId', groupId,
+          'groupName', groupName,
+          'state', 'FAILED',
+        );
+      }
+    } else {
+      const groupHashKey = `${prefix}:${this.name}:groups:${groupId}`;
+      const groupName = groupState.name;
+      await client.hset(groupHashKey,
+        'state', 'FAILED',
+        'updatedAt', timestamp,
+      );
+      await client.xadd(
+        `${prefix}:${this.name}:events`,
+        '*',
+        'event', 'group:failed',
+        'groupId', groupId,
+        'groupName', groupName,
+        'state', 'FAILED',
+      );
+    }
   }
 }
