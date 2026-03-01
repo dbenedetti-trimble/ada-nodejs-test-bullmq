@@ -13,6 +13,7 @@ const packer = new Packr({
 const pack = packer.pack;
 
 import {
+  DeadLetterFilter,
   JobJson,
   JobJsonRaw,
   MinimalJob,
@@ -1829,6 +1830,57 @@ export class Scripts {
     // Add the code property to the error object
     (error as any).code = code;
     return error;
+  }
+
+  /**
+   * Atomically move a job from the source queue's active list to the DLQ
+   * queue's waiting list on terminal failure.
+   *
+   * @param job - The job that reached terminal failure.
+   * @param dlqQueueName - Target DLQ queue name.
+   * @param timestamp - Current timestamp in ms.
+   * @returns The new DLQ job ID.
+   */
+  async moveToDeadLetter<T = any, R = any, N extends string = string>(
+    job: MinimalJob<T, R, N>,
+    dlqQueueName: string,
+    timestamp: number,
+  ): Promise<string> {
+    // TODO (features pass): build args from job data + dlqMeta and call execCommand
+    throw new Error('moveToDeadLetter: not yet implemented');
+  }
+
+  /**
+   * Atomically replay a DLQ job back to its source queue.
+   *
+   * @param dlqJobId - ID of the job in the DLQ.
+   * @param dlqQueueName - Name of the DLQ queue.
+   * @param sourceQueueName - Name of the original source queue.
+   * @returns The new job ID in the source queue.
+   */
+  async replayFromDeadLetter(
+    dlqJobId: string,
+    dlqQueueName: string,
+    sourceQueueName: string,
+  ): Promise<string> {
+    // TODO (features pass): build args and call execCommand for replayFromDeadLetter
+    throw new Error('replayFromDeadLetter: not yet implemented');
+  }
+
+  /**
+   * Bulk remove jobs from the DLQ waiting list, optionally filtered by name.
+   * failedReason filtering is handled at the TypeScript layer.
+   *
+   * @param dlqQueueName - Name of the DLQ queue.
+   * @param filter - Optional filter (name only; failedReason handled in TypeScript).
+   * @returns Count of removed jobs.
+   */
+  async purgeDeadLetters(
+    dlqQueueName: string,
+    filter?: DeadLetterFilter,
+  ): Promise<number> {
+    // TODO (features pass): build args and call execCommand for purgeDeadLetters
+    throw new Error('purgeDeadLetters: not yet implemented');
   }
 }
 
