@@ -859,10 +859,10 @@ export class Job<
             this.recordJobMetrics('retried');
           }
 
-          const _retryLogger = this.queue.opts.logger;
+          const _retryLogger = this.queue.opts?.logger;
           if (
             _retryLogger &&
-            (!this.queue.opts.logEvents ||
+            (!this.queue.opts?.logEvents ||
               this.queue.opts.logEvents.includes('job:retrying'))
           ) {
             _retryLogger.warn({
@@ -1442,10 +1442,10 @@ export class Job<
 
     this.recordJobMetrics('delayed');
 
-    const _delayLogger = this.queue.opts.logger;
+    const _delayLogger = this.queue.opts?.logger;
     if (
       _delayLogger &&
-      (!this.queue.opts.logEvents ||
+      (!this.queue.opts?.logEvents ||
         this.queue.opts.logEvents.includes('job:delayed'))
     ) {
       _delayLogger.debug({
