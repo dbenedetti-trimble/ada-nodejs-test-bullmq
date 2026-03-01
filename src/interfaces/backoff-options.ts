@@ -7,7 +7,13 @@ export interface BackoffOptions {
   /**
    * Name of the backoff strategy.
    */
-  type: 'fixed' | 'exponential' | (string & {});
+  type:
+    | 'fixed'
+    | 'exponential'
+    | 'linear'
+    | 'polynomial'
+    | 'decorrelatedJitter'
+    | (string & {});
 
   /**
    * Delay in milliseconds.
@@ -19,4 +25,17 @@ export interface BackoffOptions {
    * @defaultValue 0
    */
   jitter?: number;
+
+  /**
+   * Maximum delay in milliseconds. Caps the computed delay for any strategy after
+   * jitter is applied. A value of 0 is treated as "no cap".
+   */
+  maxDelay?: number;
+
+  /**
+   * Exponent used by the `polynomial` strategy.
+   * Must be a positive number.
+   * @defaultValue 2
+   */
+  exponent?: number;
 }
