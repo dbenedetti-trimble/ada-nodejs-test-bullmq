@@ -4,6 +4,7 @@
 
 'use strict';
 import { Packr } from 'msgpackr';
+import { v4 } from 'uuid';
 
 const packer = new Packr({
   useRecords: false,
@@ -13,6 +14,7 @@ const packer = new Packr({
 const pack = packer.pack;
 
 import {
+  DeadLetterFilter,
   JobJson,
   JobJsonRaw,
   MinimalJob,
@@ -1829,6 +1831,162 @@ export class Scripts {
     // Add the code property to the error object
     (error as any).code = code;
     return error;
+  }
+
+  /**
+   * Atomically move a job from the source queue's active list to the DLQ
+   * queue's waiting list on terminal failure.
+   *
+   * @param job - The job that reached terminal failure.
+   * @param dlqQueueName - Target DLQ queue name.
+   * @param timestamp - Current timestamp in ms.
+   * @returns The new DLQ job ID.
+   */
+  async moveToDeadLetter<T = any, R = any, N extends string = string>(
+    job: MinimalJob<T, R, N>,
+    dlqQueueName: string,
+    timestamp: number,
+    token: string,
+  ): Promise<string> {
+    const client = await this.queue.client;
+    const queuePrefix = this.queue.opts.prefix || 'bull';
+    const dlqPrefix = `${queuePrefix}:${dlqQueueName}`;
+    const dlqJobId = v4();
+
+    const keys: (string | number | Buffer)[] = [
+      this.queue.keys.active,
+      this.queue.toKey(job.id ?? ''),
+      this.queue.keys.events,
+      `${dlqPrefix}:wait`,
+      `${dlqPrefix}:${dlqJobId}`,
+      `${dlqPrefix}:events`,
+      `${dlqPrefix}:meta`,
+    ];
+
+    const workerOpts = this.queue.opts as WorkerOptions;
+    const keepJobs = this.getKeepJobs(
+      job.opts?.removeOnFail,
+      workerOpts.removeOnFail,
+    );
+
+    const dlqMeta = {
+      sourceQueue: this.queue.name,
+      originalJobId: job.id,
+      failedReason: job.failedReason || '',
+      stacktrace: job.stacktrace || [],
+      attemptsMade: job.attemptsMade + 1,
+      deadLetteredAt: timestamp,
+      originalTimestamp: job.timestamp,
+      originalOpts: job.opts,
+    };
+
+    const args: (string | number | Buffer)[] = [
+      job.id ?? '',
+      timestamp,
+      dlqJobId,
+      pack({ token, keepJobs, dlqQueueName }),
+      JSON.stringify(dlqMeta),
+    ];
+
+    const result = await this.execCommand(
+      client,
+      'moveToDeadLetter',
+      keys.concat(args),
+    );
+
+    if (typeof result === 'number' && result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId: job.id,
+        command: 'moveToDeadLetter',
+        state: 'active',
+      });
+    }
+
+    return result as string;
+  }
+
+  /**
+   * Atomically replay a DLQ job back to its source queue.
+   *
+   * @param dlqJobId - ID of the job in the DLQ.
+   * @param dlqQueueName - Name of the DLQ queue.
+   * @param sourceQueueName - Name of the original source queue.
+   * @returns The new job ID in the source queue.
+   */
+  async replayFromDeadLetter(
+    dlqJobId: string,
+    dlqQueueName: string,
+    sourceQueueName: string,
+  ): Promise<string> {
+    const client = await this.queue.client;
+    const queuePrefix = this.queue.opts.prefix || 'bull';
+    const newJobId = v4();
+    const timestamp = Date.now();
+
+    const dlqPrefix = `${queuePrefix}:${dlqQueueName}`;
+    const srcPrefix = `${queuePrefix}:${sourceQueueName}`;
+
+    const keys: (string | number | Buffer)[] = [
+      `${dlqPrefix}:${dlqJobId}`,
+      `${dlqPrefix}:wait`,
+      `${srcPrefix}:wait`,
+      `${srcPrefix}:${newJobId}`,
+    ];
+
+    const args: (string | number | Buffer)[] = [dlqJobId, newJobId, timestamp];
+
+    const result = await this.execCommand(
+      client,
+      'replayFromDeadLetter',
+      keys.concat(args),
+    );
+
+    if (typeof result === 'number' && result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId: dlqJobId,
+        command: 'replayFromDeadLetter',
+        state: 'active',
+      });
+    }
+
+    return result as string;
+  }
+
+  /**
+   * Bulk remove jobs from the DLQ waiting list, optionally filtered by name.
+   * failedReason filtering is handled at the TypeScript layer.
+   *
+   * @param dlqQueueName - Name of the DLQ queue.
+   * @param filter - Optional filter (name only; failedReason handled in TypeScript).
+   * @returns Count of removed jobs.
+   */
+  async purgeDeadLetters(
+    dlqQueueName: string,
+    filter?: DeadLetterFilter,
+  ): Promise<number> {
+    const client = await this.queue.client;
+    const queuePrefix = this.queue.opts.prefix || 'bull';
+    const dlqPrefix = `${queuePrefix}:${dlqQueueName}`;
+
+    const keys: (string | number | Buffer)[] = [
+      `${dlqPrefix}:wait`,
+      `${dlqPrefix}:meta`,
+    ];
+    const args: (string | number | Buffer)[] = [
+      queuePrefix,
+      dlqQueueName,
+      filter?.name || '',
+    ];
+
+    const result = await this.execCommand(
+      client,
+      'purgeDeadLetters',
+      keys.concat(args),
+    );
+
+    return result as number;
   }
 }
 

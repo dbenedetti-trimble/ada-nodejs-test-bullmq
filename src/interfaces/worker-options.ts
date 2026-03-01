@@ -1,4 +1,5 @@
 import { AdvancedOptions } from './advanced-options';
+import { DeadLetterQueueOptions } from './dead-letter-options';
 import { QueueBaseOptions } from './queue-options';
 import { RateLimiterOptions } from './rate-limiter-options';
 import { MetricsOptions } from './metrics-options';
@@ -157,6 +158,15 @@ export interface WorkerOptions extends QueueBaseOptions, SandboxedOptions {
    * Telemetry Addon
    */
   telemetry?: Telemetry;
+
+  /**
+   * When set, jobs that reach terminal failure (retries exhausted or UnrecoverableError)
+   * are moved to the specified queue instead of the source queue's 'failed' sorted set.
+   *
+   * NOTE (Redis Cluster): Atomicity requires source and DLQ queue names to hash to the
+   * same Redis slot. Use the same hash tag in both names, e.g. '\{payments\}' and '\{payments\}-dlq'.
+   */
+  deadLetterQueue?: DeadLetterQueueOptions;
 }
 
 export interface GetNextJobOptions {

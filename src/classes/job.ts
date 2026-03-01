@@ -805,13 +805,13 @@ export class Job<
     err: E,
     token: string,
     fetchNext = false,
-  ): Promise<void | any[]> {
+  ): Promise<void | any[] | string> {
     this.failedReason = err?.message;
 
     // Check if an automatic retry should be performed
     const [shouldRetry, retryDelay] = await this.shouldRetryJob(err);
 
-    return this.queue.trace<Promise<void | any[]>>(
+    return this.queue.trace<Promise<void | any[] | string>>(
       SpanKind.INTERNAL,
       this.getSpanOperation(shouldRetry, retryDelay),
       this.queue.name,
@@ -859,19 +859,31 @@ export class Job<
             this.recordJobMetrics('retried');
           }
         } else {
-          const args = this.scripts.moveToFailedArgs(
-            this,
-            this.failedReason,
-            this.opts.removeOnFail,
-            token,
-            fetchNext,
-            fieldsToUpdate,
-          );
+          const workerOpts = this.queue.opts as WorkerOptions;
+          if (workerOpts.deadLetterQueue) {
+            const dlqTimestamp = Date.now();
+            result = await this.scripts.moveToDeadLetter(
+              this,
+              workerOpts.deadLetterQueue.queueName,
+              dlqTimestamp,
+              token,
+            );
+            finishedOn = dlqTimestamp;
+          } else {
+            const args = this.scripts.moveToFailedArgs(
+              this,
+              this.failedReason,
+              this.opts.removeOnFail,
+              token,
+              fetchNext,
+              fieldsToUpdate,
+            );
 
-          result = await this.scripts.moveToFinished(this.id, args);
-          finishedOn = args[
-            this.scripts.moveToFinishedKeys.length + 1
-          ] as number;
+            result = await this.scripts.moveToFinished(this.id, args);
+            finishedOn = args[
+              this.scripts.moveToFinishedKeys.length + 1
+            ] as number;
+          }
 
           // Only record failed metrics when job is not retrying
           this.recordJobMetrics('failed');

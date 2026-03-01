@@ -2,6 +2,7 @@ import { v4 } from 'uuid';
 import {
   BaseJobOptions,
   BulkJobOptions,
+  DeadLetterFilter,
   IoredisListener,
   JobSchedulerJson,
   MinimalQueue,
@@ -36,8 +37,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -1055,5 +1057,137 @@ export class Queue<
   async removeDeprecatedPriorityKey(): Promise<number> {
     const client = await this.client;
     return client.del(this.toKey('priority'));
+  }
+
+  /**
+   * Returns the number of jobs currently in the DLQ (waiting state of this queue).
+   */
+  async getDeadLetterCount(): Promise<number> {
+    return this.getWaitingCount();
+  }
+
+  /**
+   * Returns a paginated list of DLQ jobs ordered by arrival (newest first).
+   *
+   * @param start - Zero-based start index.
+   * @param end - Zero-based end index (inclusive).
+   */
+  async getDeadLetterJobs(start: number, end: number): Promise<Job[]> {
+    return this.getWaiting(start, end);
+  }
+
+  /**
+   * Returns a single DLQ job by ID, or undefined if not found.
+   *
+   * @param jobId - The job ID to look up.
+   */
+  async peekDeadLetter(jobId: string): Promise<Job | undefined> {
+    return this.getJob(jobId);
+  }
+
+  /**
+   * Replays a single DLQ job back to its original source queue.
+   * Creates a new job in the source queue with original data (minus _dlqMeta)
+   * and removes the DLQ job.
+   *
+   * @param jobId - The DLQ job ID to replay.
+   * @returns The new job ID in the source queue.
+   */
+  async replayDeadLetter(jobId: string): Promise<string> {
+    const dlqJob = await this.peekDeadLetter(jobId);
+    if (!dlqJob) {
+      throw new Error(`Dead letter job ${jobId} not found`);
+    }
+
+    const dlqMeta = (dlqJob.data as any)?._dlqMeta;
+    if (!dlqMeta?.sourceQueue) {
+      throw new Error(`Dead letter job ${jobId} has no _dlqMeta.sourceQueue`);
+    }
+
+    const originalData = { ...dlqJob.data } as any;
+    delete originalData._dlqMeta;
+
+    const sourceQueue = new Queue(dlqMeta.sourceQueue, {
+      connection: this.opts.connection,
+      prefix: this.opts.prefix,
+    });
+
+    try {
+      const newJob = await sourceQueue.add(
+        dlqJob.name,
+        originalData,
+        dlqMeta.originalOpts || {},
+      );
+      await this.remove(jobId);
+      return newJob.id!;
+    } finally {
+      await sourceQueue.close();
+    }
+  }
+
+  /**
+   * Replays all (or filtered) DLQ jobs back to their original source queues.
+   *
+   * @param filter - Optional filter by name and/or failedReason substring.
+   * @returns Count of replayed jobs.
+   */
+  async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    const jobs = await this.getWaiting(0, -1);
+    let count = 0;
+
+    for (const job of jobs) {
+      const meta = (job.data as any)?._dlqMeta;
+
+      if (filter?.name && job.name !== filter.name) {
+        continue;
+      }
+
+      if (filter?.failedReason) {
+        const reason: string = meta?.failedReason || '';
+        if (!reason.toLowerCase().includes(filter.failedReason.toLowerCase())) {
+          continue;
+        }
+      }
+
+      await this.replayDeadLetter(job.id!);
+      count++;
+    }
+
+    return count;
+  }
+
+  /**
+   * Removes all (or filtered) DLQ jobs from this queue.
+   * For name-only or no filter, delegates to Lua for efficiency.
+   * For failedReason filter, iterates at TypeScript layer.
+   *
+   * @param filter - Optional filter by name and/or failedReason substring.
+   * @returns Count of removed jobs.
+   */
+  async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    if (filter?.failedReason) {
+      const jobs = await this.getWaiting(0, -1);
+      let count = 0;
+
+      for (const job of jobs) {
+        const meta = (job.data as any)?._dlqMeta;
+        const reason: string = meta?.failedReason || '';
+
+        if (filter.name && job.name !== filter.name) {
+          continue;
+        }
+
+        if (!reason.toLowerCase().includes(filter.failedReason.toLowerCase())) {
+          continue;
+        }
+
+        await this.remove(job.id!);
+        count++;
+      }
+
+      return count;
+    }
+
+    return this.scripts.purgeDeadLetters(this.name, filter);
   }
 }
