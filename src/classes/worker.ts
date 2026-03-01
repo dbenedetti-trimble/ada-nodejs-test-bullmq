@@ -1080,6 +1080,62 @@ will never work with more accuracy than 1ms. */
       );
       this.emit('completed', job, result, 'active');
 
+      if (job.opts?.group?.id) {
+        const ownerQueueName = job.opts.group.queueName;
+        const groupResult = await this.scripts.updateGroupOnFinished(
+          job.opts.group.id,
+          ownerQueueName,
+          this.toKey(job.id),
+          'completed',
+          job.returnvalue,
+          Date.now(),
+        );
+        if (groupResult?.trigger === 'compensation') {
+          const completedJobKeys = await this.scripts.cancelGroupJobs(
+            job.opts.group.id,
+            ownerQueueName,
+            Date.now(),
+          );
+          const allCompletedKeys = [
+            ...new Set([
+              ...(groupResult.completedJobsForCompensation || []),
+              ...completedJobKeys,
+            ]),
+          ];
+          if (allCompletedKeys.length > 0) {
+            let compensationMap: Record<string, any> = {};
+            try {
+              const groupStateRaw = await this.scripts.getGroupState(
+                job.opts.group.id,
+                ownerQueueName,
+              );
+              if (groupStateRaw?.['compensation']) {
+                compensationMap = JSON.parse(groupStateRaw['compensation']);
+              }
+            } catch {
+              // ignore
+            }
+            await this.scripts.triggerCompensation(
+              job.opts.group.id,
+              ownerQueueName,
+              allCompletedKeys,
+              compensationMap,
+            );
+          }
+        }
+      }
+
+      const compGroup = (job.opts as any)?.groupCompensation;
+      if (compGroup?.groupId) {
+        await this.scripts.updateGroupCompensation(
+          compGroup.groupId,
+          compGroup.ownerQueueName,
+          this.toKey(job.id),
+          'success',
+          Date.now(),
+        );
+      }
+
       span?.addEvent('job completed', {
         [TelemetryAttributes.JobResult]: JSON.stringify(result),
       });
@@ -1131,6 +1187,62 @@ will never work with more accuracy than 1ms. */
       );
 
       this.emit('failed', job, err, 'active');
+
+      if (job.opts?.group?.id && job.finishedOn) {
+        const ownerQueueName = job.opts.group.queueName;
+        const groupResult = await this.scripts.updateGroupOnFinished(
+          job.opts.group.id,
+          ownerQueueName,
+          this.toKey(job.id),
+          'failed',
+          undefined,
+          Date.now(),
+        );
+        if (groupResult?.trigger === 'compensation') {
+          const completedJobKeys = await this.scripts.cancelGroupJobs(
+            job.opts.group.id,
+            ownerQueueName,
+            Date.now(),
+          );
+          const allCompletedKeys = [
+            ...new Set([
+              ...(groupResult.completedJobsForCompensation || []),
+              ...completedJobKeys,
+            ]),
+          ];
+          if (allCompletedKeys.length > 0) {
+            let compensationMap: Record<string, any> = {};
+            try {
+              const groupStateRaw = await this.scripts.getGroupState(
+                job.opts.group.id,
+                ownerQueueName,
+              );
+              if (groupStateRaw?.['compensation']) {
+                compensationMap = JSON.parse(groupStateRaw['compensation']);
+              }
+            } catch {
+              // ignore
+            }
+            await this.scripts.triggerCompensation(
+              job.opts.group.id,
+              ownerQueueName,
+              allCompletedKeys,
+              compensationMap,
+            );
+          }
+        }
+      }
+
+      const compGroup = (job.opts as any)?.groupCompensation;
+      if (compGroup?.groupId && job.finishedOn) {
+        await this.scripts.updateGroupCompensation(
+          compGroup.groupId,
+          compGroup.ownerQueueName,
+          this.toKey(job.id),
+          'failure',
+          Date.now(),
+        );
+      }
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,

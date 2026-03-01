@@ -135,7 +135,7 @@ describe('[FEATURE_NAME] - Worker Processing', () => {
 
       const failedReason = 'Intentional test failure';
 
-      const failing = new Promise<void>((resolve) => {
+      const failing = new Promise<void>(resolve => {
         queueEvents.on('failed', ({ failedReason: reason }) => {
           expect(reason).toBe(failedReason);
           resolve();
@@ -249,7 +249,7 @@ describe('[FEATURE_NAME] - Worker Processing', () => {
       let maxActive = 0;
       let completedCount = 0;
 
-      const allDone = new Promise<void>((resolve) => {
+      const allDone = new Promise<void>(resolve => {
         const worker = new Worker(
           queueName,
           async () => {

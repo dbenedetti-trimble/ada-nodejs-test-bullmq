@@ -11,12 +11,15 @@ import {
   RedisClient,
   Tracer,
   ContextManager,
+  GroupOptions,
+  GroupNode,
 } from '../interfaces';
 import { getParentKey, isRedisInstance, trace } from '../utils';
 import { Job } from './job';
 import { KeysMap, QueueKeys } from './queue-keys';
 import { RedisConnection } from './redis-connection';
 import { SpanKind, TelemetryAttributes } from '../enums';
+import { Scripts } from './scripts';
 
 export interface AddNodeOpts {
   multi: ChainableCommander;
@@ -552,6 +555,130 @@ export class FlowProducer extends EventEmitter {
       databaseType: this.connection.databaseType,
       trace: async (): Promise<any> => {},
     };
+  }
+
+  /**
+   * Adds a transactional job group (saga).
+   *
+   * Creates a group where all jobs must either all succeed or roll back via
+   * compensation handlers. The operation is atomic: if the Redis pipeline
+   * fails, no partial group exists.
+   *
+   * @param options - Group definition including name, jobs, and compensation mapping.
+   * @returns A GroupNode with the generated groupId and created Job instances.
+   */
+  async addGroup(options: GroupOptions): Promise<GroupNode> {
+    if (this.closing) {
+      throw new Error('FlowProducer is closing');
+    }
+
+    // Input validation (before any Redis writes)
+    if (!options.jobs || options.jobs.length === 0) {
+      throw new Error('Group must contain at least one job');
+    }
+
+    for (const jobDef of options.jobs) {
+      if ((jobDef.opts as any)?.parent) {
+        throw new Error('A job cannot belong to both a group and a flow');
+      }
+    }
+
+    if (options.compensation) {
+      const jobNames = new Set(options.jobs.map(j => j.name));
+      for (const key of Object.keys(options.compensation)) {
+        if (!jobNames.has(key)) {
+          throw new Error(
+            `Compensation key "${key}" does not match any job name`,
+          );
+        }
+      }
+    }
+
+    const groupId = v4();
+    const groupName = options.name;
+    const ownerQueueName = options.queueName;
+    const timestamp = Date.now();
+    const compensationJson = JSON.stringify(options.compensation || {});
+    const prefix = this.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+
+    const client = await this.connection.client;
+    const multi = client.multi();
+
+    // Build Job instances for each group job
+    const jobs: Job[] = [];
+    const jobKeys: string[] = [];
+
+    for (const jobDef of options.jobs) {
+      const jobId = (jobDef.opts as any)?.jobId || v4();
+      const jobQueue = this.queueFromNode(
+        { queueName: jobDef.queueName },
+        gk,
+        prefix,
+      );
+
+      const jobOpts = {
+        ...(jobDef.opts || {}),
+        group: {
+          id: groupId,
+          name: groupName,
+          queueName: ownerQueueName,
+        },
+      };
+
+      const job = new this.Job(
+        jobQueue,
+        jobDef.name,
+        jobDef.data,
+        jobOpts,
+        jobId,
+      );
+
+      jobs.push(job);
+
+      // Fully-qualified job key: {prefix}:{queueName}:{jobId}
+      const jobKey = `${prefix}:${jobDef.queueName}:${jobId}`;
+      jobKeys.push(jobKey);
+    }
+
+    // Create a Scripts instance scoped to the owner queue for createGroup
+    const ownerQueueContext = {
+      opts: { prefix, connection: {} },
+      keys: gk.getKeys(ownerQueueName),
+      toKey: (type: string) => gk.toKey(ownerQueueName, type),
+      closing: this.closing,
+      get client() {
+        return Promise.resolve(client);
+      },
+      get databaseType() {
+        return undefined as any;
+      },
+      get redisVersion() {
+        return undefined as any;
+      },
+    };
+    const scripts = new Scripts(ownerQueueContext);
+
+    // Call createGroup on the pipeline (synchronous — pipeline is buffered)
+    scripts.createGroup(
+      multi,
+      ownerQueueName,
+      groupId,
+      groupName,
+      timestamp,
+      options.jobs.length,
+      compensationJson,
+      jobKeys,
+    );
+
+    // Add each job to its queue via the pipeline
+    for (const job of jobs) {
+      await job.addJob(<Redis>(multi as unknown));
+    }
+
+    await multi.exec();
+
+    return { groupId, groupName, jobs };
   }
 
   /**

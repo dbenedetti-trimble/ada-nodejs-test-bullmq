@@ -46,6 +46,7 @@ import {
 import { ChainableCommander } from 'ioredis';
 import { version as packageVersion } from '../version';
 import { UnrecoverableError } from './errors';
+import { QueueKeys } from './queue-keys';
 export type JobData = [JobJsonRaw | number, string?];
 
 export class Scripts {
@@ -1829,6 +1830,290 @@ export class Scripts {
     // Add the code property to the error object
     (error as any).code = code;
     return error;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Group scripts
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Atomically creates a group metadata hash, adds job keys to the membership
+   * hash, and registers the group in the index sorted set.
+   * Called on a `client.multi()` pipeline in FlowProducer.addGroup().
+   */
+  createGroup(
+    client: ChainableCommander,
+    queueName: string,
+    groupId: string,
+    groupName: string,
+    timestamp: number,
+    totalJobs: number,
+    compensationJson: string,
+    jobKeys: string[],
+  ): void {
+    const prefix = this.queue.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+    const keys = [
+      gk.toGroupKey(queueName, groupId),
+      gk.toGroupJobsKey(queueName, groupId),
+      gk.toGroupsIndexKey(queueName),
+      this.queue.keys.events,
+    ];
+    const argv = [
+      groupId,
+      groupName,
+      String(timestamp),
+      String(totalJobs),
+      compensationJson,
+      ...jobKeys,
+    ];
+    this.execCommand(client, 'createGroup', [...keys, ...argv]);
+  }
+
+  /**
+   * Called after moveToFinished for a group member job. Updates the group's
+   * job status, counters, and state. Returns a compensation trigger object
+   * if the group transitions to COMPENSATING.
+   */
+  async updateGroupOnFinished(
+    groupId: string,
+    ownerQueueName: string,
+    jobKey: string,
+    finalStatus: 'completed' | 'failed',
+    returnValue: any,
+    timestamp: number,
+  ): Promise<{
+    trigger?: 'compensation';
+    completedJobsForCompensation?: string[];
+  } | null> {
+    const client = await this.queue.client;
+    const prefix = this.queue.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+
+    // For the events key, use the owner queue's events stream
+    const ownerEventsKey = gk.toKey(ownerQueueName, 'events');
+
+    const keys = [
+      gk.toGroupKey(ownerQueueName, groupId),
+      gk.toGroupJobsKey(ownerQueueName, groupId),
+      ownerEventsKey,
+    ];
+    const returnValueStr =
+      returnValue !== undefined && returnValue !== null
+        ? JSON.stringify(returnValue)
+        : '';
+    const argv = [jobKey, finalStatus, String(timestamp), returnValueStr];
+
+    const result: any = await this.execCommand(
+      client,
+      'updateGroupOnFinished',
+      [...keys, ...argv],
+    );
+
+    if (!result) {
+      return null;
+    }
+
+    // result is an array: ["compensation", jobKey1, jobKey2, ...]
+    if (Array.isArray(result) && result[0] === 'compensation') {
+      const completedJobsForCompensation = result.slice(1) as string[];
+      return { trigger: 'compensation', completedJobsForCompensation };
+    }
+
+    return null;
+  }
+
+  /**
+   * Cancels all pending/waiting/delayed jobs in a group and updates group state
+   * to COMPENSATING or FAILED.
+   */
+  async cancelGroupJobs(
+    groupId: string,
+    ownerQueueName: string,
+    timestamp: number,
+  ): Promise<string[]> {
+    const client = await this.queue.client;
+    const prefix = this.queue.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+
+    const ownerEventsKey = gk.toKey(ownerQueueName, 'events');
+
+    const keys = [
+      gk.toGroupKey(ownerQueueName, groupId),
+      gk.toGroupJobsKey(ownerQueueName, groupId),
+      ownerEventsKey,
+    ];
+    const argv = [String(timestamp), groupId];
+
+    const result: any = await this.execCommand(client, 'cancelGroupJobs', [
+      ...keys,
+      ...argv,
+    ]);
+
+    return Array.isArray(result) ? (result as string[]) : [];
+  }
+
+  /**
+   * Enqueues compensation jobs for a list of completed group member jobs.
+   * Groups completed jobs by their source queue and calls triggerCompensation
+   * once per unique compensation queue.
+   */
+  async triggerCompensation(
+    groupId: string,
+    ownerQueueName: string,
+    completedJobKeys: string[],
+    compensationMap: Record<string, any>,
+  ): Promise<void> {
+    if (completedJobKeys.length === 0) {
+      return;
+    }
+
+    const client = await this.queue.client;
+    const prefix = this.queue.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+
+    // Group compensation jobs by their compensation queue (source queue + :compensation).
+    // completedJobKey format: {prefix}:{jobQueueName}:{jobId}
+    // We fetch each job's name from its Redis hash to look up the correct compensation entry.
+    const byCompQueue: Map<string, any[]> = new Map();
+
+    for (const jobKey of completedJobKeys) {
+      const parts = jobKey.split(':');
+      if (parts.length < 3) {
+        continue;
+      }
+      const jobId = parts[parts.length - 1];
+      const jobQueueName = parts.slice(1, parts.length - 1).join(':');
+      const compQueueName = `${jobQueueName}:compensation`;
+
+      // Fetch the job name and return value from Redis to match the compensation map entry
+      const [jobName, returnValueRaw] = await client.hmget(
+        jobKey,
+        'name',
+        'returnvalue',
+      );
+
+      if (!jobName || !compensationMap[jobName]) {
+        continue;
+      }
+
+      const compDef = compensationMap[jobName];
+      let originalReturnValue: any = null;
+      try {
+        originalReturnValue = returnValueRaw
+          ? JSON.parse(returnValueRaw)
+          : null;
+      } catch {
+        originalReturnValue = null;
+      }
+
+      const compJobData = {
+        groupId,
+        originalJobName: jobName,
+        originalJobId: jobId,
+        originalReturnValue,
+        compensationData: compDef.data,
+      };
+
+      const defaultOpts = {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 1000 },
+        ...compDef.opts,
+        groupCompensation: { groupId, ownerQueueName },
+      };
+
+      if (!byCompQueue.has(compQueueName)) {
+        byCompQueue.set(compQueueName, []);
+      }
+      byCompQueue
+        .get(compQueueName)!
+        .push([
+          compDef.name,
+          JSON.stringify(compJobData),
+          JSON.stringify(defaultOpts),
+          String(Date.now()),
+        ]);
+    }
+
+    const ownerGroupHashKey = gk.toGroupKey(ownerQueueName, groupId);
+    let totalCompJobs = 0;
+
+    for (const [compQueueName, jobDescs] of byCompQueue.entries()) {
+      if (jobDescs.length === 0) {
+        continue;
+      }
+
+      const waitKey = gk.toKey(compQueueName, 'wait');
+      const metaKey = gk.toKey(compQueueName, 'meta');
+      const eventsKey = gk.toKey(compQueueName, 'events');
+
+      const keys = [waitKey, metaKey, eventsKey];
+      const argv = [prefix, pack(jobDescs)];
+
+      await this.execCommand(client, 'triggerCompensation', [...keys, ...argv]);
+      totalCompJobs += jobDescs.length;
+    }
+
+    // Store totalCompensationJobs in the group hash so updateGroupCompensation knows when done
+    if (totalCompJobs > 0) {
+      await client.hset(
+        ownerGroupHashKey,
+        'totalCompensationJobs',
+        totalCompJobs,
+      );
+    }
+  }
+
+  /**
+   * Reads group metadata from Redis. Returns null for non-existent groups.
+   */
+  async getGroupState(
+    groupId: string,
+    ownerQueueName: string,
+  ): Promise<Record<string, string> | null> {
+    const client = await this.queue.client;
+    const prefix = this.queue.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+
+    const keys = [gk.toGroupKey(ownerQueueName, groupId)];
+
+    const result: any = await this.execCommand(client, 'getGroupState', keys);
+
+    if (!result || (Array.isArray(result) && result.length === 0)) {
+      return null;
+    }
+
+    // HGETALL returns a flat array [field1, value1, field2, value2, ...]
+    return array2obj(result);
+  }
+
+  /**
+   * Tracks completion of a single compensation job and transitions the group
+   * to FAILED or FAILED_COMPENSATION once all compensations are done.
+   */
+  async updateGroupCompensation(
+    groupId: string,
+    ownerQueueName: string,
+    compensationJobKey: string,
+    outcome: 'success' | 'failure',
+    timestamp: number,
+  ): Promise<string | null> {
+    const client = await this.queue.client;
+    const prefix = this.queue.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+
+    const ownerEventsKey = gk.toKey(ownerQueueName, 'events');
+
+    const keys = [gk.toGroupKey(ownerQueueName, groupId), ownerEventsKey];
+    const argv = [compensationJobKey, outcome, String(timestamp), groupId];
+
+    const result: any = await this.execCommand(
+      client,
+      'updateGroupCompensation',
+      [...keys, ...argv],
+    );
+
+    return result ? String(result) : null;
   }
 }
 

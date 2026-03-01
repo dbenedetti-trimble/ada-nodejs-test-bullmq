@@ -443,7 +443,7 @@ export class Job<
     const options: Partial<Record<string, any>> = {};
     for (const item of optionEntries) {
       const [attributeName, value] = item;
-      if ((optsDecode as Record<string, any>)[<string>attributeName]) {
+        if ((optsDecode as Record<string, any>)[<string>attributeName]) {
         options[(optsDecode as Record<string, any>)[<string>attributeName]] =
           value;
       } else {
@@ -451,6 +451,12 @@ export class Job<
           options.telemetry = { ...options.telemetry, metadata: value };
         } else if (attributeName === 'omc') {
           options.telemetry = { ...options.telemetry, omitContext: value };
+        } else if (attributeName === 'grp') {
+          options.group = {
+            id: value.id,
+            name: value.name,
+            queueName: value.qn,
+          };
         } else {
           options[<string>attributeName] = value;
         }
@@ -570,6 +576,12 @@ export class Job<
           if (value.omitContext !== undefined) {
             options.omc = value.omitContext;
           }
+        } else if (attributeName === 'group') {
+          options.grp = {
+            id: value.id,
+            name: value.name,
+            qn: value.queueName,
+          };
         } else {
           options[attributeName] = value;
         }

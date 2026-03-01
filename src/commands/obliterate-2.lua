@@ -113,6 +113,17 @@ if(maxCount > 0) then
     baseKey .. 'metrics:completed:data',
     baseKey .. 'metrics:failed',
     baseKey .. 'metrics:failed:data')
+
+  -- Clean up group keys: index ZSET + individual group hashes
+  local groupsIndexKey = baseKey .. 'groups'
+  local groupIds = rcall("ZRANGE", groupsIndexKey, 0, -1)
+  for _, gid in ipairs(groupIds) do
+    rcall("DEL",
+      groupsIndexKey .. ':' .. gid,
+      groupsIndexKey .. ':' .. gid .. ':jobs')
+  end
+  rcall("DEL", groupsIndexKey)
+
   return 0
 else
   return 1

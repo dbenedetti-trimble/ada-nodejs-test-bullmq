@@ -107,4 +107,16 @@ export interface BaseJobOptions extends DefaultJobOptions {
    * Internal property used by repeatable jobs.
    */
   prevMillis?: number;
+
+  /**
+   * Group membership options. When set, this job belongs to a transactional job group.
+   */
+  group?: {
+    /** The group ID this job belongs to. */
+    id: string;
+    /** The group display name. */
+    name: string;
+    /** The owner queue name where group metadata is stored. */
+    queueName: string;
+  };
 }
