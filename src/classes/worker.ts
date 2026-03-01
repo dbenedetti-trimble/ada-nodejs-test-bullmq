@@ -40,9 +40,10 @@ import {
   WaitingError,
   UnrecoverableError,
 } from './errors';
-import { SpanKind, TelemetryAttributes } from '../enums';
+import { CircuitBreakerState, SpanKind, TelemetryAttributes } from '../enums';
 import { JobScheduler } from './job-scheduler';
 import { LockManager } from './lock-manager';
+import { CircuitBreaker } from './circuit-breaker';
 
 // 10 seconds is the maximum time a BZPOPMIN can block.
 const maximumBlockTimeout = 10;
@@ -171,6 +172,30 @@ export interface WorkerListener<
    * This event is triggered when locks are successfully renewed.
    */
   locksRenewed: (data: { count: number; jobIds: string[] }) => void;
+
+  /**
+   * Listen to 'circuit:open' event.
+   *
+   * Fired when the circuit breaker transitions from CLOSED to OPEN after
+   * reaching the consecutive failure threshold.
+   */
+  'circuit:open': (payload: { failures: number; threshold: number }) => void;
+
+  /**
+   * Listen to 'circuit:half-open' event.
+   *
+   * Fired when the circuit breaker transitions from OPEN to HALF_OPEN
+   * after the duration timer elapses.
+   */
+  'circuit:half-open': (payload: { duration: number }) => void;
+
+  /**
+   * Listen to 'circuit:closed' event.
+   *
+   * Fired when the circuit breaker transitions from HALF_OPEN to CLOSED
+   * after a successful test job.
+   */
+  'circuit:closed': (payload: { testJobId: string }) => void;
 }
 
 /**
@@ -193,6 +218,7 @@ export class Worker<
   private blockUntil = 0;
   private _concurrency: number;
   private childPool: ChildPool;
+  private circuitBreaker?: CircuitBreaker;
   private drained = false;
   private limitUntil = 0;
   protected lockManager: LockManager;
@@ -264,6 +290,22 @@ export class Worker<
     if (typeof this.opts.drainDelay !== 'number' || this.opts.drainDelay <= 0) {
       throw new Error('drainDelay must be greater than 0');
     }
+
+    // TODO(features): validate circuitBreaker options and instantiate CircuitBreaker
+    // if (this.opts.circuitBreaker) {
+    //   const cb = this.opts.circuitBreaker;
+    //   if (typeof cb.threshold !== 'number' || cb.threshold <= 0 || !Number.isInteger(cb.threshold)) {
+    //     throw new Error('circuitBreaker.threshold must be a positive integer');
+    //   }
+    //   if (typeof cb.duration !== 'number' || cb.duration <= 0 || !Number.isInteger(cb.duration)) {
+    //     throw new Error('circuitBreaker.duration must be a positive integer');
+    //   }
+    //   if (cb.halfOpenMaxAttempts !== undefined &&
+    //       (typeof cb.halfOpenMaxAttempts !== 'number' || cb.halfOpenMaxAttempts <= 0)) {
+    //     throw new Error('circuitBreaker.halfOpenMaxAttempts must be a positive integer');
+    //   }
+    //   this.circuitBreaker = new CircuitBreaker(cb);
+    // }
 
     this.concurrency = this.opts.concurrency;
 
@@ -577,6 +619,18 @@ export class Worker<
   }
 
   /**
+   * Waits while the circuit breaker is OPEN, using an interruptible delay
+   * (same abortDelayController as the rate limiter) so that close() and
+   * the HALF_OPEN timer transition can both wake this up.
+   *
+   * TODO(features): implement — use this.abortDelayController pattern from waitForRateLimit()
+   */
+  private async waitForCircuitBreaker(): Promise<void> {
+    // TODO(features): implement circuit breaker wait
+    // Analogous to waitForRateLimit() but triggered when circuitBreaker.shouldAllowJob() === false
+  }
+
+  /**
    * This is the main loop in BullMQ. Its goals are to fetch jobs from the queue
    * as efficiently as possible, providing concurrency and minimal unnecessary calls
    * to Redis.
@@ -600,7 +654,9 @@ export class Worker<
         !this.paused &&
         !this.waiting &&
         asyncFifoQueue.numTotal() < this._concurrency &&
-        !this.isRateLimited()
+        !this.isRateLimited() &&
+        // TODO(features): add circuit breaker guard: this.circuitBreaker?.shouldAllowJob() !== false
+        true
       ) {
         const token = `${this.id}:${tokenPostfix++}`;
 
@@ -1080,6 +1136,16 @@ will never work with more accuracy than 1ms. */
       );
       this.emit('completed', job, result, 'active');
 
+      // TODO(features): circuit breaker recordSuccess — after emit('completed'):
+      // if (this.circuitBreaker) {
+      //   const prev = this.circuitBreaker.getState();
+      //   this.circuitBreaker.recordSuccess(job.id!);
+      //   const next = this.circuitBreaker.getState();
+      //   if (prev === CircuitBreakerState.HALF_OPEN && next === CircuitBreakerState.CLOSED) {
+      //     this.emit('circuit:closed', { testJobId: job.id! });
+      //   }
+      // }
+
       span?.addEvent('job completed', {
         [TelemetryAttributes.JobResult]: JSON.stringify(result),
       });
@@ -1131,6 +1197,30 @@ will never work with more accuracy than 1ms. */
       );
 
       this.emit('failed', job, err, 'active');
+
+      // TODO(features): circuit breaker recordFailure — after emit('failed'):
+      // if (this.circuitBreaker) {
+      //   const prev = this.circuitBreaker.getState();
+      //   this.circuitBreaker.recordFailure(job?.id);
+      //   const next = this.circuitBreaker.getState();
+      //   if (prev === CircuitBreakerState.CLOSED && next === CircuitBreakerState.OPEN) {
+      //     this.emit('circuit:open', {
+      //       failures: this.opts.circuitBreaker!.threshold,
+      //       threshold: this.opts.circuitBreaker!.threshold,
+      //     });
+      //     this.circuitBreaker.startDurationTimer(() => {
+      //       this.circuitBreaker!.transitionToHalfOpen();
+      //       this.emit('circuit:half-open', { duration: this.opts.circuitBreaker!.duration });
+      //       this.abortDelayController?.abort();
+      //     });
+      //   } else if (prev === CircuitBreakerState.HALF_OPEN && next === CircuitBreakerState.OPEN) {
+      //     this.circuitBreaker.startDurationTimer(() => {
+      //       this.circuitBreaker!.transitionToHalfOpen();
+      //       this.emit('circuit:half-open', { duration: this.opts.circuitBreaker!.duration });
+      //       this.abortDelayController?.abort();
+      //     });
+      //   }
+      // }
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,
@@ -1219,6 +1309,19 @@ will never work with more accuracy than 1ms. */
   }
 
   /**
+   * Returns the current circuit breaker state as a string, or `undefined`
+   * if the `circuitBreaker` option was not configured on this Worker.
+   */
+  getCircuitBreakerState(): 'closed' | 'open' | 'half-open' | undefined {
+    // TODO(features): return this.circuitBreaker?.getState() once CircuitBreaker is implemented
+    return this.circuitBreaker?.getState() as
+      | 'closed'
+      | 'open'
+      | 'half-open'
+      | undefined;
+  }
+
+  /**
    *
    * Closes the worker and related redis connections.
    *
@@ -1248,6 +1351,8 @@ will never work with more accuracy than 1ms. */
           });
           this.emit('closing', 'closing queue');
           this.abortDelayController?.abort();
+          // TODO(features): clear circuit breaker timer on close
+          // this.circuitBreaker?.close();
 
           // Define the async cleanup functions
           const asyncCleanups = [
