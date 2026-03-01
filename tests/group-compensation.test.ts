@@ -33,7 +33,7 @@ describe('JobGroup compensation', () => {
 
   beforeEach(async () => {
     queueName = `test-${v4()}`;
-    compQueueName = `${queueName}-compensation`;
+    compQueueName = `${queueName}:compensation`;
     queue = new Queue(queueName, { connection, prefix });
     flowProducer = new FlowProducer({ connection, prefix });
     queueEvents = new QueueEvents(queueName, { connection, prefix });
@@ -180,7 +180,9 @@ describe('JobGroup compensation', () => {
       new Worker(
         queueName,
         async job => {
-          if (job.data.fail) {throw new Error('intentional fail');}
+          if (job.data.fail) {
+            throw new Error('intentional fail');
+          }
           return 'done';
         },
         { connection, prefix },
@@ -235,7 +237,9 @@ describe('JobGroup compensation', () => {
       new Worker(
         queueName,
         async job => {
-          if (job.data.fail) {throw new Error('intentional fail');}
+          if (job.data.fail) {
+            throw new Error('intentional fail');
+          }
           return 'done';
         },
         { connection, prefix },
