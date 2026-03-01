@@ -193,11 +193,15 @@ export class QueueBase extends EventEmitter implements MinimalQueue {
     }
   }
 
+  get logger() {
+    return this.opts.logger;
+  }
+
   /**
    * Returns true if the given lifecycle event should be logged.
    * Fast-path: returns false immediately when no logger is configured.
    */
-  protected shouldLog(event: LifecycleEvent): boolean {
+  shouldLog(event: LifecycleEvent): boolean {
     if (!this.opts.logger) {
       return false;
     }

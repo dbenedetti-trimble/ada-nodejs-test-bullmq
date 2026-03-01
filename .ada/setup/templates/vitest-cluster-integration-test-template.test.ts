@@ -42,19 +42,16 @@ describe('[FEATURE_NAME] - Redis Cluster', () => {
   let cluster: Cluster;
 
   beforeAll(async () => {
-    cluster = new IORedis.Cluster(
-      [{ host: redisHost, port: 7380 }],
-      {
-        natMap: {
-          '172.33.0.2:6380': { host: redisHost, port: 7380 },
-          '172.33.0.3:6381': { host: redisHost, port: 7381 },
-          '172.33.0.4:6382': { host: redisHost, port: 7382 },
-          '172.33.0.5:6383': { host: redisHost, port: 7383 },
-          '172.33.0.6:6384': { host: redisHost, port: 7384 },
-          '172.33.0.7:6385': { host: redisHost, port: 7385 },
-        },
+    cluster = new IORedis.Cluster([{ host: redisHost, port: 7380 }], {
+      natMap: {
+        '172.33.0.2:6380': { host: redisHost, port: 7380 },
+        '172.33.0.3:6381': { host: redisHost, port: 7381 },
+        '172.33.0.4:6382': { host: redisHost, port: 7382 },
+        '172.33.0.5:6383': { host: redisHost, port: 7383 },
+        '172.33.0.6:6384': { host: redisHost, port: 7384 },
+        '172.33.0.7:6385': { host: redisHost, port: 7385 },
       },
-    );
+    });
     await cluster.ping();
   });
 
@@ -127,17 +124,16 @@ describe('[FEATURE_NAME] - Redis Cluster', () => {
       });
       await queueEvents.waitUntilReady();
 
-      const completed = new Promise<string>((resolve) => {
+      const completed = new Promise<string>(resolve => {
         queueEvents.on('completed', ({ jobId }) => {
           resolve(jobId);
         });
       });
 
-      const worker = new Worker(
-        queueName,
-        async () => 'done',
-        { connection: cluster, prefix },
-      );
+      const worker = new Worker(queueName, async () => 'done', {
+        connection: cluster,
+        prefix,
+      });
       await worker.waitUntilReady();
 
       const job = await queue.add('test', { data: 'test' });

@@ -2,6 +2,7 @@ import { RedisClient } from './connection';
 import { Span } from './telemetry';
 import { SpanKind } from '../enums/telemetry-attributes';
 import { ScriptQueueContext } from './script-queue-context';
+import { LifecycleEvent, LifecycleLogger } from './lifecycle-logger';
 
 export interface MinimalQueue extends ScriptQueueContext {
   readonly name: string;
@@ -37,4 +38,19 @@ export interface MinimalQueue extends ScriptQueueContext {
     callback: (span?: Span, dstPropagationMetadata?: string) => Promise<T> | T,
     srcPropagationMetadata?: string,
   ): Promise<T | Promise<T>>;
+
+  /**
+   * The user-supplied lifecycle logger, if configured.
+   */
+  logger?: LifecycleLogger;
+
+  /**
+   * Returns true when the given lifecycle event should be logged.
+   *
+   * Centralises the filter check so that Job methods can call this
+   * without re-implementing the logEvents guard logic.
+   *
+   * @param event - The lifecycle event to test.
+   */
+  shouldLog(event: LifecycleEvent): boolean;
 }

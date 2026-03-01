@@ -834,13 +834,8 @@ export class Job<
 
         let finishedOn: number;
         if (shouldRetry) {
-          const queueOpts = this.queue.opts;
-          if (
-            queueOpts.logger &&
-            (!queueOpts.logEvents ||
-              queueOpts.logEvents.includes('job:retrying'))
-          ) {
-            queueOpts.logger.warn({
+          if (this.queue.shouldLog('job:retrying')) {
+            this.queue.logger!.warn({
               timestamp: Date.now(),
               event: 'job:retrying',
               queue: this.queue.name,
@@ -1445,12 +1440,8 @@ export class Job<
 
     this.recordJobMetrics('delayed');
 
-    const queueOpts = this.queue.opts;
-    if (
-      queueOpts.logger &&
-      (!queueOpts.logEvents || queueOpts.logEvents.includes('job:delayed'))
-    ) {
-      queueOpts.logger.debug({
+    if (this.queue.shouldLog('job:delayed')) {
+      this.queue.logger!.debug({
         timestamp: Date.now(),
         event: 'job:delayed',
         queue: this.queue.name,

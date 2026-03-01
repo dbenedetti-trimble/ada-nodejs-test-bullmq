@@ -16,8 +16,6 @@ import {
   LifecycleLogEntry,
   LifecycleEvent,
 } from '../src/interfaces';
-import { after } from 'lodash';
-
 function createMockLogger(): LifecycleLogger & {
   calls: { level: string; entry: LifecycleLogEntry }[];
 } {
