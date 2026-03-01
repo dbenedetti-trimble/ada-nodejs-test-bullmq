@@ -1151,9 +1151,9 @@ will never work with more accuracy than 1ms. */
 
       this.emit('failed', job, err, 'active');
 
-      // TODO (features pass): emit 'deadLettered' only when job was actually DLQ-routed
-      // (i.e. when workerOpts.deadLetterQueue is set and shouldRetry was false).
-      // The signal from job.moveToFailed() needs to propagate here.
+      if (this.opts.deadLetterQueue && typeof result === 'string') {
+        this.emit('deadLettered', job, this.opts.deadLetterQueue.queueName);
+      }
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,

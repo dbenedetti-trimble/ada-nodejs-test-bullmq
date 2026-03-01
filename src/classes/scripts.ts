@@ -4,6 +4,7 @@
 
 'use strict';
 import { Packr } from 'msgpackr';
+import { v4 } from 'uuid';
 
 const packer = new Packr({
   useRecords: false,
@@ -1845,9 +1846,64 @@ export class Scripts {
     job: MinimalJob<T, R, N>,
     dlqQueueName: string,
     timestamp: number,
+    token: string,
   ): Promise<string> {
-    // TODO (features pass): build args from job data + dlqMeta and call execCommand
-    throw new Error('moveToDeadLetter: not yet implemented');
+    const client = await this.queue.client;
+    const queuePrefix = this.queue.opts.prefix || 'bull';
+    const dlqPrefix = `${queuePrefix}:${dlqQueueName}`;
+    const dlqJobId = v4();
+
+    const keys: (string | number | Buffer)[] = [
+      this.queue.keys.active,
+      this.queue.toKey(job.id ?? ''),
+      this.queue.keys.events,
+      `${dlqPrefix}:wait`,
+      `${dlqPrefix}:${dlqJobId}`,
+      `${dlqPrefix}:events`,
+      `${dlqPrefix}:meta`,
+    ];
+
+    const workerOpts = this.queue.opts as WorkerOptions;
+    const keepJobs = this.getKeepJobs(
+      job.opts?.removeOnFail,
+      workerOpts.removeOnFail,
+    );
+
+    const dlqMeta = {
+      sourceQueue: (this.queue as any).name,
+      originalJobId: job.id,
+      failedReason: job.failedReason || '',
+      stacktrace: job.stacktrace || [],
+      attemptsMade: job.attemptsMade + 1,
+      deadLetteredAt: timestamp,
+      originalTimestamp: job.timestamp,
+      originalOpts: job.opts,
+    };
+
+    const args: (string | number | Buffer)[] = [
+      job.id ?? '',
+      timestamp,
+      dlqJobId,
+      pack({ token, keepJobs, dlqQueueName }),
+      JSON.stringify(dlqMeta),
+    ];
+
+    const result = await this.execCommand(
+      client,
+      'moveToDeadLetter',
+      keys.concat(args),
+    );
+
+    if (typeof result === 'number' && result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId: job.id,
+        command: 'moveToDeadLetter',
+        state: 'active',
+      });
+    }
+
+    return result as string;
   }
 
   /**
@@ -1863,8 +1919,39 @@ export class Scripts {
     dlqQueueName: string,
     sourceQueueName: string,
   ): Promise<string> {
-    // TODO (features pass): build args and call execCommand for replayFromDeadLetter
-    throw new Error('replayFromDeadLetter: not yet implemented');
+    const client = await this.queue.client;
+    const queuePrefix = this.queue.opts.prefix || 'bull';
+    const newJobId = v4();
+    const timestamp = Date.now();
+
+    const dlqPrefix = `${queuePrefix}:${dlqQueueName}`;
+    const srcPrefix = `${queuePrefix}:${sourceQueueName}`;
+
+    const keys: (string | number | Buffer)[] = [
+      `${dlqPrefix}:${dlqJobId}`,
+      `${dlqPrefix}:wait`,
+      `${srcPrefix}:wait`,
+      `${srcPrefix}:${newJobId}`,
+    ];
+
+    const args: (string | number | Buffer)[] = [dlqJobId, newJobId, timestamp];
+
+    const result = await this.execCommand(
+      client,
+      'replayFromDeadLetter',
+      keys.concat(args),
+    );
+
+    if (typeof result === 'number' && result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId: dlqJobId,
+        command: 'replayFromDeadLetter',
+        state: 'active',
+      });
+    }
+
+    return result as string;
   }
 
   /**
@@ -1879,8 +1966,27 @@ export class Scripts {
     dlqQueueName: string,
     filter?: DeadLetterFilter,
   ): Promise<number> {
-    // TODO (features pass): build args and call execCommand for purgeDeadLetters
-    throw new Error('purgeDeadLetters: not yet implemented');
+    const client = await this.queue.client;
+    const queuePrefix = this.queue.opts.prefix || 'bull';
+    const dlqPrefix = `${queuePrefix}:${dlqQueueName}`;
+
+    const keys: (string | number | Buffer)[] = [
+      `${dlqPrefix}:wait`,
+      `${dlqPrefix}:meta`,
+    ];
+    const args: (string | number | Buffer)[] = [
+      queuePrefix,
+      dlqQueueName,
+      filter?.name || '',
+    ];
+
+    const result = await this.execCommand(
+      client,
+      'purgeDeadLetters',
+      keys.concat(args),
+    );
+
+    return result as number;
   }
 }
 

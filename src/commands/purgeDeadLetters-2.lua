@@ -22,8 +22,30 @@
 local rcall = redis.call
 
 --- @include "includes/removeJobKeys"
---- @include "includes/trimEvents"
 
--- TODO (features pass): implement bulk purge with optional name filter
--- Placeholder: return 0 until implemented
-return 0
+local jobIds = rcall("LRANGE", KEYS[1], 0, -1)
+local count = 0
+local nameFilter = ARGV[3]
+local prefix = ARGV[1]
+local dlqQueueName = ARGV[2]
+
+for _, jobId in ipairs(jobIds) do
+  local shouldRemove = true
+
+  if nameFilter ~= "" then
+    local jobKey = prefix .. ":" .. dlqQueueName .. ":" .. jobId
+    local jobName = rcall("HGET", jobKey, "name")
+    if jobName ~= nameFilter then
+      shouldRemove = false
+    end
+  end
+
+  if shouldRemove then
+    local jobKey = prefix .. ":" .. dlqQueueName .. ":" .. jobId
+    removeJobKeys(jobKey)
+    rcall("LREM", KEYS[1], 0, jobId)
+    count = count + 1
+  end
+end
+
+return count

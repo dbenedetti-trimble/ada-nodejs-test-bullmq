@@ -29,8 +29,53 @@
 local rcall = redis.call
 
 --- @include "includes/removeJobKeys"
---- @include "includes/trimEvents"
 
--- TODO (features pass): implement atomic replay logic
--- Placeholder: return error code until implemented
-return -1
+-- Read DLQ job hash
+local dlqJobData = rcall("HGETALL", KEYS[1])
+if #dlqJobData == 0 then
+  return -1
+end
+
+-- Convert flat array to map
+local dlqJob = {}
+for i = 1, #dlqJobData, 2 do
+  dlqJob[dlqJobData[i]] = dlqJobData[i + 1]
+end
+
+-- Parse data to extract _dlqMeta
+local dataStr = dlqJob['data'] or "{}"
+local jobData = cjson.decode(dataStr)
+local dlqMeta = jobData['_dlqMeta']
+if not dlqMeta then
+  return -2
+end
+
+-- Strip _dlqMeta and re-encode data for the replayed job
+jobData['_dlqMeta'] = nil
+local newDataStr = cjson.encode(jobData)
+
+local jobName = dlqJob['name'] or ""
+local newJobId = ARGV[2]
+local timestamp = ARGV[3]
+
+-- Reconstruct opts from _dlqMeta.originalOpts
+local originalOpts = dlqMeta['originalOpts'] or {}
+local newOptsStr = cjson.encode(originalOpts)
+
+-- Store new source job hash (fresh job with reset attemptsMade)
+rcall("HMSET", KEYS[4],
+  "name", jobName,
+  "data", newDataStr,
+  "opts", newOptsStr,
+  "timestamp", timestamp,
+  "delay", 0,
+  "priority", 0)
+
+-- Add to source waiting list
+rcall("LPUSH", KEYS[3], newJobId)
+
+-- Remove DLQ job hash and list entry
+removeJobKeys(KEYS[1])
+rcall("LREM", KEYS[2], 0, ARGV[1])
+
+return newJobId

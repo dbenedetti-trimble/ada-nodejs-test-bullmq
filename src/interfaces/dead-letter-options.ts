@@ -6,7 +6,7 @@ export interface DeadLetterQueueOptions {
    *
    * NOTE (Redis Cluster): Atomicity of DLQ movement requires source and DLQ
    * queue names to hash to the same Redis slot. Use the same hash tag in both
-   * names, e.g. '{payments}' and '{payments}-dlq'.
+   * names, e.g. '\{payments\}' and '\{payments\}-dlq'.
    */
   queueName: string;
 }

@@ -805,13 +805,13 @@ export class Job<
     err: E,
     token: string,
     fetchNext = false,
-  ): Promise<void | any[]> {
+  ): Promise<void | any[] | string> {
     this.failedReason = err?.message;
 
     // Check if an automatic retry should be performed
     const [shouldRetry, retryDelay] = await this.shouldRetryJob(err);
 
-    return this.queue.trace<Promise<void | any[]>>(
+    return this.queue.trace<Promise<void | any[] | string>>(
       SpanKind.INTERNAL,
       this.getSpanOperation(shouldRetry, retryDelay),
       this.queue.name,
@@ -861,9 +861,14 @@ export class Job<
         } else {
           const workerOpts = this.queue.opts as WorkerOptions;
           if (workerOpts.deadLetterQueue) {
-            // TODO (features pass): call scripts.moveToDeadLetter() with DLQ config
-            // and set result / finishedOn accordingly
-            throw new Error('moveToDeadLetter: not yet implemented');
+            const dlqTimestamp = Date.now();
+            result = await this.scripts.moveToDeadLetter(
+              this,
+              workerOpts.deadLetterQueue.queueName,
+              dlqTimestamp,
+              token,
+            );
+            finishedOn = dlqTimestamp;
           } else {
             const args = this.scripts.moveToFailedArgs(
               this,

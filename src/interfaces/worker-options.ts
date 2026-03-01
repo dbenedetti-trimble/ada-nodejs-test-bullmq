@@ -164,7 +164,7 @@ export interface WorkerOptions extends QueueBaseOptions, SandboxedOptions {
    * are moved to the specified queue instead of the source queue's 'failed' sorted set.
    *
    * NOTE (Redis Cluster): Atomicity requires source and DLQ queue names to hash to the
-   * same Redis slot. Use the same hash tag in both names, e.g. '{payments}' and '{payments}-dlq'.
+   * same Redis slot. Use the same hash tag in both names, e.g. '\{payments\}' and '\{payments\}-dlq'.
    */
   deadLetterQueue?: DeadLetterQueueOptions;
 }
