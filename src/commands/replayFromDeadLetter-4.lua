@@ -50,11 +50,18 @@ for i = 1, #rawFields, 2 do
   dlqHash[rawFields[i]] = rawFields[i + 1]
 end
 
--- 2. Extract and strip _dlqMeta from data
+-- 2. Extract and strip _dlqMeta from data.
+-- If the original data was a JSON array or primitive it was wrapped as
+-- {__originalData: <value>, _dlqMeta: {...}} — unwrap it on replay.
 local dataJson = dlqHash['data'] or '{}'
 local data = cjson.decode(dataJson)
 data['_dlqMeta'] = nil
-local newDataJson = cjson.encode(data)
+local newDataJson
+if data['__originalData'] ~= nil then
+  newDataJson = cjson.encode(data['__originalData'])
+else
+  newDataJson = cjson.encode(data)
+end
 
 -- 3. Build source job hash fields (copy DLQ fields, override specific keys)
 local sourceFields = {}

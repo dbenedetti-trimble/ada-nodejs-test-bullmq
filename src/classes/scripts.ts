@@ -1796,12 +1796,9 @@ export class Scripts {
       removeSourceOnFail = '1';
     } else if (typeof removeOnFail === 'number' && removeOnFail > 0) {
       removeSourceOnFail = '1';
-    } else if (
-      typeof removeOnFail === 'object' &&
-      removeOnFail !== null &&
-      typeof (removeOnFail as any).count === 'number' &&
-      (removeOnFail as any).count >= 0
-    ) {
+    } else if (typeof removeOnFail === 'object' && removeOnFail !== null) {
+      // Any KeepJobs object ({count}, {age}, or {count, age}) means the job
+      // should be removed (cleanup details are handled by the Lua script).
       removeSourceOnFail = '1';
     }
 

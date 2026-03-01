@@ -70,14 +70,21 @@ if removed == 0 then
   return -3
 end
 
--- 3. Construct DLQ job data: embed _dlqMeta into the existing data JSON
+-- 3. Construct DLQ job data: embed _dlqMeta into the existing data JSON.
+-- BullMQ serialises job data with JSON.stringify(), which never produces
+-- leading whitespace, so the first character reliably identifies the type.
 local originalData = jobHash['data'] or '{}'
 local dlqData
-if originalData == '{}' then
-  dlqData = '{"_dlqMeta":' .. dlqMetaJson .. '}'
+if string.sub(originalData, 1, 1) == '{' then
+  -- JSON object: decode, inject _dlqMeta, re-encode (handles all edge cases).
+  local parsedData = cjson.decode(originalData)
+  parsedData['_dlqMeta'] = cjson.decode(dlqMetaJson)
+  dlqData = cjson.encode(parsedData)
 else
-  -- Append _dlqMeta before the closing brace of the JSON object
-  dlqData = string.sub(originalData, 1, -2) .. ',"_dlqMeta":' .. dlqMetaJson .. '}'
+  -- JSON array or primitive (string, number, boolean, null): wrap in an
+  -- object so _dlqMeta can be stored alongside the original value.
+  -- replayFromDeadLetter-4.lua unwraps __originalData on replay.
+  dlqData = '{"__originalData":' .. originalData .. ',"_dlqMeta":' .. dlqMetaJson .. '}'
 end
 
 -- 4. Build DLQ job hash fields (copy source fields, override specific keys)
