@@ -16,6 +16,7 @@ export class CircuitBreaker {
   private state: CircuitBreakerState = CircuitBreakerState.CLOSED;
   private failureCount = 0;
   private halfOpenAttempts = 0;
+  private halfOpenSuccesses = 0;
   private durationTimer: ReturnType<typeof setTimeout> | undefined;
   private closed = false;
 
@@ -54,7 +55,10 @@ export class CircuitBreaker {
   /**
    * Record a successful job completion.
    * In CLOSED: resets failure counter.
-   * In HALF_OPEN: increments test-job counter; transitions to CLOSED when threshold met.
+   * In HALF_OPEN: increments successful test-job counter; transitions to CLOSED
+   *   only when all halfOpenMaxAttempts test jobs have succeeded. This ensures
+   *   that any concurrent test job failure (recorded via recordFailure) correctly
+   *   re-opens the circuit rather than being swallowed by an early close.
    *
    * @returns the new state after recording
    */
@@ -62,10 +66,12 @@ export class CircuitBreaker {
     if (this.state === CircuitBreakerState.CLOSED) {
       this.failureCount = 0;
     } else if (this.state === CircuitBreakerState.HALF_OPEN) {
-      if (this.halfOpenAttempts >= this.halfOpenMaxAttempts) {
+      this.halfOpenSuccesses++;
+      if (this.halfOpenSuccesses >= this.halfOpenMaxAttempts) {
         this.state = CircuitBreakerState.CLOSED;
         this.failureCount = 0;
         this.halfOpenAttempts = 0;
+        this.halfOpenSuccesses = 0;
         clearTimeout(this.durationTimer);
         this.durationTimer = undefined;
       }
@@ -88,6 +94,7 @@ export class CircuitBreaker {
       }
     } else if (this.state === CircuitBreakerState.HALF_OPEN) {
       this.halfOpenAttempts = 0;
+      this.halfOpenSuccesses = 0;
       this.state = CircuitBreakerState.OPEN;
     }
     return this.state;
@@ -111,6 +118,7 @@ export class CircuitBreaker {
   transitionToHalfOpen(): void {
     this.state = CircuitBreakerState.HALF_OPEN;
     this.halfOpenAttempts = 0;
+    this.halfOpenSuccesses = 0;
   }
 
   /**

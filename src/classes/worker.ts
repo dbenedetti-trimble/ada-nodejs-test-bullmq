@@ -1342,7 +1342,6 @@ will never work with more accuracy than 1ms. */
    * if the `circuitBreaker` option was not configured on this Worker.
    */
   getCircuitBreakerState(): 'closed' | 'open' | 'half-open' | undefined {
-    // TODO(features): return this.circuitBreaker?.getState() once CircuitBreaker is implemented
     return this.circuitBreaker?.getState() as
       | 'closed'
       | 'open'
