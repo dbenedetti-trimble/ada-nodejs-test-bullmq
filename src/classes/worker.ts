@@ -171,6 +171,30 @@ export interface WorkerListener<
    * This event is triggered when locks are successfully renewed.
    */
   locksRenewed: (data: { count: number; jobIds: string[] }) => void;
+
+  /**
+   * Listen to 'circuit:open' event.
+   *
+   * Emitted when the circuit breaker transitions from CLOSED to OPEN after
+   * consecutive failures reach the configured threshold.
+   */
+  'circuit:open': (payload: { failures: number; threshold: number }) => void;
+
+  /**
+   * Listen to 'circuit:half-open' event.
+   *
+   * Emitted when the circuit breaker transitions from OPEN to HALF_OPEN after
+   * the configured duration elapses.
+   */
+  'circuit:half-open': (payload: { duration: number }) => void;
+
+  /**
+   * Listen to 'circuit:closed' event.
+   *
+   * Emitted when the circuit breaker transitions from HALF_OPEN to CLOSED
+   * after a test job completes successfully.
+   */
+  'circuit:closed': (payload: { testJobId: string }) => void;
 }
 
 /**
@@ -193,6 +217,7 @@ export class Worker<
   private blockUntil = 0;
   private _concurrency: number;
   private childPool: ChildPool;
+  private circuitBreaker?: import('./circuit-breaker').CircuitBreaker;
   private drained = false;
   private limitUntil = 0;
   protected lockManager: LockManager;
@@ -1278,6 +1303,15 @@ will never work with more accuracy than 1ms. */
     })();
 
     return await this.closing;
+  }
+
+  /**
+   * Returns the current circuit breaker state string, or `undefined` when no
+   * circuit breaker is configured on this worker.
+   */
+  getCircuitBreakerState(): 'closed' | 'open' | 'half-open' | undefined {
+    // TODO (features pass): delegate to this.circuitBreaker?.getState()
+    return this.circuitBreaker ? (this.circuitBreaker.getState() as 'closed' | 'open' | 'half-open') : undefined;
   }
 
   /**
