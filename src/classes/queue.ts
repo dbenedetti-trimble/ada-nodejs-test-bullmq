@@ -1056,4 +1056,46 @@ export class Queue<
     const client = await this.client;
     return client.del(this.toKey('priority'));
   }
+
+  // ---------------------------------------------------------------------------
+  // Job Group API stubs — filled in during the features pass
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns the current state of a job group.
+   * Returns null if no group with the given ID exists.
+   *
+   * @param groupId - The group ID to query.
+   */
+  async getGroupState(_groupId: string): Promise<any | null> {
+    // TODO(features): delegate to this.scripts.getGroupState() and map the
+    // flat Redis array into a GroupState object.
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Returns all jobs belonging to a group with their current statuses.
+   *
+   * @param groupId - The group ID to query.
+   */
+  async getGroupJobs(_groupId: string): Promise<any[]> {
+    // TODO(features): HGETALL on the group jobs hash key and parse each entry
+    // into a GroupJobEntry (jobId, jobKey, status, queueName).
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Cancels an active group, removing pending jobs from their queues and
+   * triggering compensation for any already-completed jobs.
+   *
+   * @param groupId - The group ID to cancel.
+   * @throws InvalidGroupStateError if the group is already COMPLETED, COMPENSATING,
+   *         FAILED, or FAILED_COMPENSATION.
+   */
+  async cancelGroup(_groupId: string): Promise<void> {
+    // TODO(features): validate state via getGroupState(), then:
+    //   1. Call this.scripts.cancelGroupJobs()
+    //   2. If completed jobs exist, call this.scripts.triggerCompensation()
+    throw new Error('Not implemented');
+  }
 }

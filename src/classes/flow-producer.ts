@@ -555,6 +555,28 @@ export class FlowProducer extends EventEmitter {
   }
 
   /**
+   * Adds a transactional job group (saga).
+   *
+   * Creates a group where all jobs must either all succeed or roll back via
+   * compensation handlers. The operation is atomic: if the Redis pipeline
+   * fails, no partial group exists.
+   *
+   * @param options - Group definition including name, jobs, and compensation mapping.
+   * @returns A GroupNode with the generated groupId and created Job instances.
+   */
+  async addGroup(_options: any): Promise<any> {
+    // TODO(features): implement full addGroup logic:
+    //   1. Validate options (non-empty jobs, no opts.parent, valid compensation keys)
+    //   2. Generate groupId via v4()
+    //   3. Open client.multi() pipeline
+    //   4. Call createGroup-4.lua on pipeline with group metadata and job keys
+    //   5. For each job: call addStandardJob / addDelayedJob / addPrioritizedJob on pipeline
+    //   6. await multi.exec()
+    //   7. Return GroupNode { groupId, groupName, jobs[] }
+    throw new Error('Not implemented');
+  }
+
+  /**
    *
    * Closes the connection and returns a promise that resolves when the connection is closed.
    */

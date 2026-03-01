@@ -1830,6 +1830,98 @@ export class Scripts {
     (error as any).code = code;
     return error;
   }
+
+  // ---------------------------------------------------------------------------
+  // Group script stubs — filled in during the features pass
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Atomically creates a group metadata hash, adds job keys to the membership
+   * hash, and registers the group in the index sorted set.
+   * Called on a `client.multi()` pipeline in FlowProducer.addGroup().
+   */
+  async createGroup(
+    _client: any,
+    _queueName: string,
+    _groupId: string,
+    _groupName: string,
+    _timestamp: number,
+    _totalJobs: number,
+    _compensationJson: string,
+    _jobKeys: string[],
+  ): Promise<void> {
+    // TODO(features): build KEYS/ARGV and call execCommand('createGroup', ...)
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Called after moveToFinished for a group member job. Updates the group's
+   * job status, counters, and state. Returns a compensation trigger object
+   * if the group transitions to COMPENSATING.
+   */
+  async updateGroupOnFinished(
+    _groupId: string,
+    _ownerQueueName: string,
+    _jobKey: string,
+    _finalStatus: 'completed' | 'failed',
+    _returnValue: any,
+    _timestamp: number,
+  ): Promise<{ trigger?: 'compensation'; completedJobsForCompensation?: string[] } | null> {
+    // TODO(features): build KEYS/ARGV and call execCommand('updateGroupOnFinished', ...)
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Cancels all pending/waiting/delayed jobs in a group and updates group state
+   * to COMPENSATING or FAILED.
+   */
+  async cancelGroupJobs(
+    _groupId: string,
+    _ownerQueueName: string,
+    _timestamp: number,
+  ): Promise<string[]> {
+    // TODO(features): build KEYS/ARGV and call execCommand('cancelGroupJobs', ...)
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Enqueues compensation jobs for a list of completed group member jobs.
+   */
+  async triggerCompensation(
+    _groupId: string,
+    _ownerQueueName: string,
+    _completedJobKeys: string[],
+    _compensationMap: Record<string, any>,
+  ): Promise<void> {
+    // TODO(features): build KEYS/ARGV per compensation queue and call execCommand('triggerCompensation', ...)
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Reads group metadata from Redis. Returns null for non-existent groups.
+   */
+  async getGroupState(
+    _groupId: string,
+    _ownerQueueName: string,
+  ): Promise<Record<string, string> | null> {
+    // TODO(features): build KEYS/ARGV and call execCommand('getGroupState', ...)
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Tracks completion of a single compensation job and transitions the group
+   * to FAILED or FAILED_COMPENSATION once all compensations are done.
+   */
+  async updateGroupCompensation(
+    _groupId: string,
+    _ownerQueueName: string,
+    _compensationJobKey: string,
+    _outcome: 'success' | 'failure',
+    _timestamp: number,
+  ): Promise<string | null> {
+    // TODO(features): build KEYS/ARGV and call execCommand('updateGroupCompensation', ...)
+    throw new Error('Not implemented');
+  }
 }
 
 export function raw2NextJobData(raw: any[]) {

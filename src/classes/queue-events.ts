@@ -258,6 +258,58 @@ export interface QueueEventsListener extends IoredisListener {
    * @param id - The identifier of the event.
    */
   'waiting-children': (args: { jobId: string }, id: string) => void;
+
+  /**
+   * Listen to 'group:completed' event.
+   *
+   * This event is triggered when all jobs in a group have completed successfully,
+   * transitioning the group to the COMPLETED state.
+   *
+   * @param args - `groupId` and `groupName` of the completed group.
+   * @param id - The event stream identifier.
+   */
+  'group:completed': (
+    args: { groupId: string; groupName: string },
+    id: string,
+  ) => void;
+
+  /**
+   * Listen to 'group:compensating' event.
+   *
+   * This event is triggered when a job in a group fails after exhausting retries,
+   * causing the group to enter the COMPENSATING state.
+   *
+   * @param args - Group identifiers, the failed job ID, and the failure reason.
+   * @param id - The event stream identifier.
+   */
+  'group:compensating': (
+    args: {
+      groupId: string;
+      groupName: string;
+      failedJobId: string;
+      reason: string;
+    },
+    id: string,
+  ) => void;
+
+  /**
+   * Listen to 'group:failed' event.
+   *
+   * This event is triggered when a group reaches its terminal failure state
+   * (FAILED after successful compensation, or FAILED_COMPENSATION when
+   * compensation itself fails).
+   *
+   * @param args - Group identifiers and the terminal state value.
+   * @param id - The event stream identifier.
+   */
+  'group:failed': (
+    args: {
+      groupId: string;
+      groupName: string;
+      state: 'FAILED' | 'FAILED_COMPENSATION';
+    },
+    id: string,
+  ) => void;
 }
 
 type CustomParameters<T> = T extends (...args: infer Args) => void

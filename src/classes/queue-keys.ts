@@ -39,4 +39,28 @@ export class QueueKeys {
   getQueueQualifiedName(name: string): string {
     return `${this.prefix}:${name}`;
   }
+
+  /**
+   * Returns the Redis key for the groups index sorted set for a queue.
+   * Key: {prefix}:{queueName}:groups
+   */
+  toGroupsIndexKey(queueName: string): string {
+    return this.toKey(queueName, 'groups');
+  }
+
+  /**
+   * Returns the Redis key for a specific group's metadata hash.
+   * Key: {prefix}:{queueName}:groups:{groupId}
+   */
+  toGroupKey(queueName: string, groupId: string): string {
+    return `${this.toGroupsIndexKey(queueName)}:${groupId}`;
+  }
+
+  /**
+   * Returns the Redis key for a specific group's job membership hash.
+   * Key: {prefix}:{queueName}:groups:{groupId}:jobs
+   */
+  toGroupJobsKey(queueName: string, groupId: string): string {
+    return `${this.toGroupKey(queueName, groupId)}:jobs`;
+  }
 }
