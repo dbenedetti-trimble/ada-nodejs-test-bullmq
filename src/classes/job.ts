@@ -5,11 +5,13 @@ import {
   DependenciesOpts,
   JobJson,
   JobJsonRaw,
+  LifecycleEvent,
   MinimalJob,
   MinimalQueue,
   MoveToWaitingChildrenOpts,
   ParentKeys,
   ParentKeyOpts,
+  QueueBaseOptions,
   RedisClient,
   RetryOptions,
   WorkerOptions,
@@ -832,6 +834,15 @@ export class Job<
           tm,
         };
 
+        const jobLogger = (this.queue.opts as QueueBaseOptions).logger;
+        const jobShouldLog = (event: LifecycleEvent): boolean => {
+          if (!jobLogger) {
+            return false;
+          }
+          const events = (this.queue.opts as QueueBaseOptions).logEvents;
+          return !events || events.includes(event);
+        };
+
         let finishedOn: number;
         if (shouldRetry) {
           if (retryDelay) {
@@ -857,6 +868,21 @@ export class Job<
             );
 
             this.recordJobMetrics('retried');
+          }
+
+          if (jobShouldLog('job:retrying')) {
+            jobLogger!.warn({
+              timestamp: Date.now(),
+              event: 'job:retrying',
+              queue: this.queueName,
+              jobId: this.id,
+              jobName: this.name,
+              attemptsMade: this.attemptsMade,
+              data: {
+                delay: retryDelay,
+                maxAttempts: this.opts.attempts,
+              },
+            });
           }
         } else {
           const args = this.scripts.moveToFailedArgs(
@@ -1424,6 +1450,21 @@ export class Job<
     this.delay = finalDelay;
 
     this.recordJobMetrics('delayed');
+
+    const delayedLogger = (this.queue.opts as QueueBaseOptions).logger;
+    if (delayedLogger) {
+      const delayedEvents = (this.queue.opts as QueueBaseOptions).logEvents;
+      if (!delayedEvents || delayedEvents.includes('job:delayed')) {
+        delayedLogger.debug({
+          timestamp: Date.now(),
+          event: 'job:delayed',
+          queue: this.queueName,
+          jobId: this.id,
+          jobName: this.name,
+          data: { delay: finalDelay },
+        });
+      }
+    }
 
     return movedToDelayed;
   }

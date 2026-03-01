@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import {
+  LifecycleEvent,
   MinimalQueue,
   QueueBaseOptions,
   RedisClient,
@@ -218,5 +219,19 @@ export class QueueBase extends EventEmitter implements MinimalQueue {
       callback,
       srcPropagationMetadata,
     );
+  }
+
+  /**
+   * Returns true when the given lifecycle event should be passed to the configured logger.
+   * Fast-returns false when no logger is configured (zero allocation path).
+   */
+  protected shouldLog(event: LifecycleEvent): boolean {
+    if (!this.opts.logger) {
+      return false;
+    }
+    if (!this.opts.logEvents) {
+      return true;
+    }
+    return this.opts.logEvents.includes(event);
   }
 }
