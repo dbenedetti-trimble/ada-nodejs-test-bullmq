@@ -2,6 +2,7 @@ import { AdvancedRepeatOptions } from './advanced-options';
 import { DefaultJobOptions } from './base-job-options';
 import { ConnectionOptions } from './redis-options';
 import { Telemetry } from './telemetry';
+import { LifecycleEvent, LifecycleLogger } from './lifecycle-logger';
 
 export enum ClientType {
   blocking = 'blocking',
@@ -38,6 +39,17 @@ export interface QueueBaseOptions {
    * Telemetry client
    */
   telemetry?: Telemetry;
+
+  /**
+   * Optional lifecycle logger. When absent, no logging occurs.
+   */
+  logger?: LifecycleLogger;
+
+  /**
+   * Optional event filter. When absent with logger set, all lifecycle events are logged.
+   * When provided, only the listed events produce log calls.
+   */
+  logEvents?: LifecycleEvent[];
 
   /**
    * Skip waiting for connection ready.
@@ -97,8 +109,10 @@ export interface RepeatBaseOptions extends QueueBaseOptions {
 /**
  * Options for QueueEvents
  */
-export interface QueueEventsOptions
-  extends Omit<QueueBaseOptions, 'telemetry'> {
+export interface QueueEventsOptions extends Omit<
+  QueueBaseOptions,
+  'telemetry'
+> {
   /**
    * Condition to start listening to events at instance creation.
    */
