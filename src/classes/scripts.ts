@@ -25,6 +25,7 @@ import {
   RetryJobOpts,
   RetryOptions,
   ScriptQueueContext,
+  DeadLetterFilter,
 } from '../interfaces';
 import {
   JobsOptions,
@@ -1829,6 +1830,54 @@ export class Scripts {
     // Add the code property to the error object
     (error as any).code = code;
     return error;
+  }
+
+  /**
+   * Atomically moves a job from the source queue's active list to the DLQ
+   * queue's wait list on terminal failure.
+   *
+   * @param job - The job being dead-lettered
+   * @param failedReason - Error message from the final failure
+   * @param dlqQueueName - Target DLQ queue name
+   * @param token - Lock token for the job
+   * @param fetchNext - Whether to fetch the next job after completion
+   * @returns DLQ job ID
+   */
+  async moveToDeadLetter<T = any, R = any, N extends string = string>(
+    job: MinimalJob<T, R, N>,
+    failedReason: string,
+    dlqQueueName: string,
+    token: string,
+    fetchNext: boolean,
+  ): Promise<string> {
+    // TODO(features): implement full moveToDeadLetter logic
+    throw new Error('moveToDeadLetter: not yet implemented');
+  }
+
+  /**
+   * Atomically replays a DLQ job back to its source queue.
+   *
+   * @param dlqJobId - The DLQ job ID to replay
+   * @param sourceQueueName - The source queue name (from _dlqMeta)
+   * @returns New job ID in the source queue
+   */
+  async replayFromDeadLetter(
+    dlqJobId: string,
+    sourceQueueName: string,
+  ): Promise<string> {
+    // TODO(features): implement full replayFromDeadLetter logic
+    throw new Error('replayFromDeadLetter: not yet implemented');
+  }
+
+  /**
+   * Bulk-removes DLQ jobs from the queue's wait list, with optional filtering.
+   *
+   * @param filter - Optional filter by name and/or failedReason substring
+   * @returns Count of jobs removed
+   */
+  async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    // TODO(features): implement full purgeDeadLetters logic
+    throw new Error('purgeDeadLetters: not yet implemented');
   }
 }
 

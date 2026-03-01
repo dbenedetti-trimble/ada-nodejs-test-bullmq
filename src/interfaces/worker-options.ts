@@ -5,6 +5,7 @@ import { MetricsOptions } from './metrics-options';
 import { KeepJobs } from '../types/keep-jobs';
 import { Telemetry } from './telemetry';
 import { SandboxedOptions } from './sandboxed-options';
+import { DeadLetterQueueOptions } from './dead-letter-options';
 
 export interface WorkerOptions extends QueueBaseOptions, SandboxedOptions {
   /**
@@ -157,6 +158,21 @@ export interface WorkerOptions extends QueueBaseOptions, SandboxedOptions {
    * Telemetry Addon
    */
   telemetry?: Telemetry;
+
+  /**
+   * Dead letter queue configuration. When set, jobs that reach terminal failure
+   * (retries exhausted or UnrecoverableError) are moved to the DLQ queue instead
+   * of the source queue's failed set.
+   *
+   * @example
+   * ```typescript
+   * new Worker('payments', processor, {
+   *   connection,
+   *   deadLetterQueue: { queueName: 'payments-dlq' },
+   * })
+   * ```
+   */
+  deadLetterQueue?: DeadLetterQueueOptions;
 }
 
 export interface GetNextJobOptions {
