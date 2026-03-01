@@ -11,6 +11,7 @@ import {
   RedisClient,
   Tracer,
   ContextManager,
+  GroupOptions,
 } from '../interfaces';
 import { getParentKey, isRedisInstance, trace } from '../utils';
 import { Job } from './job';
@@ -67,6 +68,12 @@ export interface NodeOpts {
 export interface JobNode {
   job: Job;
   children?: JobNode[];
+}
+
+export interface GroupNode {
+  groupId: string;
+  name: string;
+  jobs: Job[];
 }
 
 export interface FlowProducerListener extends IoredisListener {
@@ -552,6 +559,32 @@ export class FlowProducer extends EventEmitter {
       databaseType: this.connection.databaseType,
       trace: async (): Promise<any> => {},
     };
+  }
+
+  /**
+   * Creates a transactional job group implementing the saga compensation pattern.
+   *
+   * All jobs in the group either complete successfully (group → COMPLETED) or
+   * trigger compensation for already-completed jobs (group → COMPENSATING → FAILED).
+   *
+   * @param options - Group definition including name, member jobs, and compensation mapping
+   * @returns GroupNode containing the generated groupId and created Job instances
+   */
+  async addGroup(options: GroupOptions): Promise<GroupNode> {
+    // TODO(features): implement group creation
+    // Validation:
+    //   - options.jobs must not be empty
+    //   - no job may have opts.parent set
+    //   - compensation keys must be a subset of job names
+    // Pipeline:
+    //   1. Generate groupId via v4()
+    //   2. Build Redis pipeline
+    //   3. Call createGroup-4.lua script
+    //   4. For each job: call appropriate addStandardJob/addDelayedJob/addPrioritizedJob
+    //      with group option injected
+    //   5. Execute pipeline
+    //   6. Return GroupNode
+    throw new Error('Not implemented');
   }
 
   /**

@@ -1,4 +1,5 @@
 export * from './async-fifo-queue';
+export * from './job-group';
 export * from './backoffs';
 export * from './child';
 export * from './child-pool';

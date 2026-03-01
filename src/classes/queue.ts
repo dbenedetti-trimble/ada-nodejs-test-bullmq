@@ -8,7 +8,10 @@ import {
   QueueOptions,
   RepeatableJob,
   RepeatOptions,
+  GroupStateResult,
+  GroupJobEntry,
 } from '../interfaces';
+import { GroupNotFoundError, InvalidGroupStateError } from './errors';
 import {
   FinishedStatus,
   JobsOptions,
@@ -1055,5 +1058,53 @@ export class Queue<
   async removeDeprecatedPriorityKey(): Promise<number> {
     const client = await this.client;
     return client.del(this.toKey('priority'));
+  }
+
+  /**
+   * Returns the current state of a job group.
+   *
+   * @param groupId - The group identifier returned from addGroup()
+   * @returns GroupStateResult or null if the group does not exist
+   */
+  async getGroupState(groupId: string): Promise<GroupStateResult | null> {
+    // TODO(features): implement via getGroupState-1.lua
+    // 1. Call scripts.getGroupState(groupId)
+    // 2. Parse returned flat array into GroupStateResult
+    // 3. Return null if group not found
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Returns all member jobs of a group with their current statuses.
+   *
+   * @param groupId - The group identifier returned from addGroup()
+   * @returns Array of GroupJobEntry objects
+   */
+  async getGroupJobs(groupId: string): Promise<GroupJobEntry[]> {
+    // TODO(features): implement via HGETALL on group jobs hash
+    // 1. Build key: {prefix}:{queueName}:groups:{groupId}:jobs
+    // 2. HGETALL key
+    // 3. Parse each field (jobKey) to extract queueName and jobId
+    // 4. Return array of GroupJobEntry
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Cancels an active group.
+   *
+   * Cancels all pending/waiting/delayed member jobs and triggers compensation
+   * for any already-completed jobs. Throws InvalidGroupStateError if the group
+   * is not in ACTIVE state.
+   *
+   * @param groupId - The group identifier returned from addGroup()
+   */
+  async cancelGroup(groupId: string): Promise<void> {
+    // TODO(features): implement
+    // 1. Call getGroupState(groupId) — throw GroupNotFoundError if null
+    // 2. If state != "ACTIVE", throw InvalidGroupStateError
+    // 3. Call cancelGroupJobs-3.lua
+    // 4. If completed jobs exist, call triggerCompensation-3.lua
+    // 5. Emit group:compensating or group:failed event as appropriate
+    throw new Error('Not implemented');
   }
 }

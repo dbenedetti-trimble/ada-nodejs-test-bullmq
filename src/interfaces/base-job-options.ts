@@ -107,4 +107,14 @@ export interface BaseJobOptions extends DefaultJobOptions {
    * Internal property used by repeatable jobs.
    */
   prevMillis?: number;
+
+  /**
+   * Group membership options. When set, this job belongs to a transactional
+   * job group and participates in saga compensation if the group fails.
+   */
+  group?: {
+    id: string;
+    name: string;
+    queueName: string;
+  };
 }

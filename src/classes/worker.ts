@@ -1088,6 +1088,8 @@ will never work with more accuracy than 1ms. */
         [TelemetryAttributes.JobAttemptsMade]: job.attemptsMade,
       });
 
+      await this.handleGroupOnFinished(job, 'completed', result);
+
       if (Array.isArray(completed)) {
         const [jobData, jobId, rateLimitDelay, delayUntil] = completed;
         this.updateDelays(rateLimitDelay, delayUntil);
@@ -1095,6 +1097,34 @@ will never work with more accuracy than 1ms. */
         return this.nextJobFromJobData(jobData, jobId, token);
       }
     }
+  }
+
+  /**
+   * Post-moveToFinished hook for group-aware jobs.
+   *
+   * If the job belongs to a group (job.opts.group is set), calls
+   * updateGroupOnFinished-3.lua to update group state. If the script
+   * returns "trigger-compensation", cancels remaining group jobs and
+   * enqueues compensation jobs for already-completed siblings.
+   */
+  protected async handleGroupOnFinished(
+    job: Job<DataType, ResultType, NameType>,
+    status: 'completed' | 'failed',
+    returnValue?: ResultType,
+  ): Promise<void> {
+    if (!job.opts?.group) {
+      return;
+    }
+    // TODO(features): implement group post-processing hook
+    // 1. client = await this.client
+    // 2. [action, completedJobsJson] = await this.scripts.updateGroupOnFinished(
+    //      client, job.opts.group.id, job.opts.group.queueName,
+    //      job.toKey(job.id), status, Date.now(), JSON.stringify(returnValue))
+    // 3. If action == "trigger-compensation":
+    //      await this.scripts.cancelGroupJobs(client, groupId, ownerQueueName, Date.now())
+    //      Build compensation descriptors from completedJobsJson + compensation mapping
+    //      await this.scripts.triggerCompensation(client, compensationQueueName, packedDescriptors)
+    // 4. If action == "completed": no extra work (event already emitted by Lua)
   }
 
   protected async handleFailed(
@@ -1131,6 +1161,8 @@ will never work with more accuracy than 1ms. */
       );
 
       this.emit('failed', job, err, 'active');
+
+      await this.handleGroupOnFinished(job, 'failed');
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,

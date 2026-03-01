@@ -1756,6 +1756,137 @@ export class Scripts {
     }
   }
 
+  /**
+   * Calls createGroup-4.lua to atomically set up group metadata in Redis.
+   *
+   * @param client - Redis pipeline or client
+   * @param groupId - Generated UUID for the group
+   * @param groupName - Human-readable group name
+   * @param timestamp - Creation timestamp (epoch ms)
+   * @param totalJobs - Number of member jobs
+   * @param compensationJson - JSON-encoded CompensationMapping
+   * @param jobKeys - Array of job key strings for member jobs
+   */
+  createGroup(
+    client: RedisClient | ChainableCommander,
+    groupId: string,
+    groupName: string,
+    timestamp: number,
+    totalJobs: number,
+    compensationJson: string,
+    jobKeys: string[],
+  ): Promise<string> | ChainableCommander {
+    // TODO(features): implement
+    // Build KEYS array: [groupHashKey, groupJobsKey, groupsIndexKey, eventsKey]
+    // Build ARGV array: [groupId, groupName, timestamp, totalJobs, compensationJson, ...jobKeys]
+    // Call execCommand(client, 'createGroup', [...keys, ...argv])
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Calls updateGroupOnFinished-3.lua after a group member job finishes.
+   *
+   * @param client - Redis client
+   * @param groupId - The group the finished job belongs to
+   * @param ownerQueueName - The queue that owns the group (for key building)
+   * @param jobKey - The job's Redis key
+   * @param status - "completed" or "failed"
+   * @param timestamp - Current timestamp (epoch ms)
+   * @param returnValue - Serialized return value (when status=completed)
+   * @returns Action tuple: ["none"|"completed"|"trigger-compensation", completedJobsJson]
+   */
+  async updateGroupOnFinished(
+    client: RedisClient,
+    groupId: string,
+    ownerQueueName: string,
+    jobKey: string,
+    status: 'completed' | 'failed',
+    timestamp: number,
+    returnValue: string,
+  ): Promise<[string, string]> {
+    // TODO(features): implement
+    // Build KEYS array: [groupHashKey, groupJobsKey, eventsKey]
+    // Build ARGV array: [jobKey, status, timestamp, returnValue]
+    // Call execCommand(client, 'updateGroupOnFinished', [...keys, ...argv])
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Calls cancelGroupJobs-3.lua to cancel pending group member jobs.
+   *
+   * @param client - Redis client
+   * @param groupId - The group to cancel jobs for
+   * @param ownerQueueName - The queue that owns the group
+   * @param timestamp - Current timestamp (epoch ms)
+   * @returns Number of jobs cancelled
+   */
+  async cancelGroupJobs(
+    client: RedisClient,
+    groupId: string,
+    ownerQueueName: string,
+    timestamp: number,
+  ): Promise<number> {
+    // TODO(features): implement
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Calls triggerCompensation-3.lua to enqueue compensation jobs.
+   *
+   * @param client - Redis client
+   * @param compensationQueueName - Name of compensation queue
+   * @param compensationJobs - Packed array of compensation job descriptors
+   * @returns Number of compensation jobs enqueued
+   */
+  async triggerCompensation(
+    client: RedisClient,
+    compensationQueueName: string,
+    compensationJobs: Buffer,
+  ): Promise<number> {
+    // TODO(features): implement
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Calls getGroupState-1.lua to read group metadata.
+   *
+   * @param client - Redis client
+   * @param groupId - The group to query
+   * @param ownerQueueName - The queue that owns the group
+   * @returns Flat field-value array or null if not found
+   */
+  async getGroupState(
+    client: RedisClient,
+    groupId: string,
+    ownerQueueName: string,
+  ): Promise<string[] | null> {
+    // TODO(features): implement
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Calls updateGroupCompensation-2.lua to track compensation job completion.
+   *
+   * @param client - Redis client
+   * @param groupId - The group owning the compensation job
+   * @param ownerQueueName - The queue that owns the group
+   * @param compensationJobKey - Key of the finished compensation job
+   * @param result - "success" or "failure"
+   * @param timestamp - Current timestamp (epoch ms)
+   * @returns New group state or "pending" if compensation still in progress
+   */
+  async updateGroupCompensation(
+    client: RedisClient,
+    groupId: string,
+    ownerQueueName: string,
+    compensationJobKey: string,
+    result: 'success' | 'failure',
+    timestamp: number,
+  ): Promise<string> {
+    // TODO(features): implement
+    throw new Error('Not implemented');
+  }
+
   finishedErrors({
     code,
     jobId,

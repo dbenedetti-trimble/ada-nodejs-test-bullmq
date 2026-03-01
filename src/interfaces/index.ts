@@ -1,4 +1,6 @@
 export * from './advanced-options';
+export * from './group-job';
+export * from './group-options';
 export * from './backoff-options';
 export * from './base-job-options';
 export * from './child-message';
