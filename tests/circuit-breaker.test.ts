@@ -71,11 +71,12 @@ describe('Circuit breaker', () => {
       { name: 'j3', data: {} },
     ]);
 
-    const circuitOpenPromise = new Promise<{ failures: number; threshold: number }>(
-      resolve => {
-        worker!.once('circuit:open', payload => resolve(payload));
-      },
-    );
+    const circuitOpenPromise = new Promise<{
+      failures: number;
+      threshold: number;
+    }>(resolve => {
+      worker!.once('circuit:open', payload => resolve(payload));
+    });
 
     worker.run();
 
@@ -92,10 +93,11 @@ describe('Circuit breaker', () => {
       queueName,
       async () => {
         callCount++;
-        if (callCount === 1 || callCount === 2) {
-          throw new Error('fail');
+        if (callCount === 3) {
+          // Only the 3rd call succeeds — resets the counter to 0
+          return;
         }
-        // callCount 3 succeeds — resets the counter
+        throw new Error('fail');
       },
       {
         connection,
@@ -131,7 +133,9 @@ describe('Circuit breaker', () => {
       let cnt = 0;
       worker!.on('failed', () => {
         cnt++;
-        if (cnt >= 2) resolve();
+        if (cnt >= 2) {
+          resolve();
+        }
       });
     });
 
@@ -155,7 +159,10 @@ describe('Circuit breaker', () => {
       },
     );
 
-    await queue.addBulk([{ name: 'j1', data: {} }, { name: 'j2', data: {} }]);
+    await queue.addBulk([
+      { name: 'j1', data: {} },
+      { name: 'j2', data: {} },
+    ]);
 
     const halfOpenPromise = new Promise<void>(resolve => {
       worker!.once('circuit:half-open', () => resolve());
@@ -273,7 +280,10 @@ describe('Circuit breaker', () => {
       },
     );
 
-    await queue.addBulk([{ name: 'j1', data: {} }, { name: 'j2', data: {} }]);
+    await queue.addBulk([
+      { name: 'j1', data: {} },
+      { name: 'j2', data: {} },
+    ]);
 
     const openPromise = new Promise<void>(resolve => {
       worker!.once('circuit:open', () => resolve());
@@ -319,7 +329,10 @@ describe('Circuit breaker', () => {
       },
     );
 
-    await queue.addBulk([{ name: 'j1', data: {} }, { name: 'j2', data: {} }]);
+    await queue.addBulk([
+      { name: 'j1', data: {} },
+      { name: 'j2', data: {} },
+    ]);
 
     const openPromise = new Promise<void>(resolve => {
       worker!.once('circuit:open', () => resolve());
@@ -350,6 +363,7 @@ describe('Circuit breaker', () => {
         stalledInterval: 100,
         lockDuration: 100,
         maxStalledCount: 1,
+        skipLockRenewal: true,
       },
     );
 
@@ -365,6 +379,10 @@ describe('Circuit breaker', () => {
 
     // Circuit should still be closed — stall should not have incremented the failure counter
     expect(worker.getCircuitBreakerState()).toBe('closed');
+
+    // Force-close because the processor is permanently hanging; afterEach can't do a graceful close
+    await worker.close(true);
+    worker = undefined;
   });
 
   it('throws synchronously for invalid circuitBreaker options', () => {

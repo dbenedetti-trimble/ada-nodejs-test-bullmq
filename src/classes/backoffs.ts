@@ -42,7 +42,9 @@ export class Backoffs {
       const { delay = 0, jitter = 0 } = opts;
       return function (attemptsMade: number): number {
         const rawDelay = delay * attemptsMade;
-        if (!jitter) return rawDelay;
+        if (!jitter) {
+          return rawDelay;
+        }
         const min = rawDelay * (1 - jitter);
         return Math.floor(Math.random() * rawDelay * jitter + min);
       };
@@ -50,10 +52,14 @@ export class Backoffs {
 
     polynomial: function (opts: BackoffOptions): BackoffStrategy {
       const { delay = 0, jitter = 0, exponent = 2 } = opts;
-      if (exponent <= 0) throw new Error('exponent must be a positive number');
+      if (exponent <= 0) {
+        throw new Error('exponent must be a positive number');
+      }
       return function (attemptsMade: number): number {
         const rawDelay = delay * Math.pow(attemptsMade, exponent);
-        if (!jitter) return rawDelay;
+        if (!jitter) {
+          return rawDelay;
+        }
         const min = rawDelay * (1 - jitter);
         return Math.floor(Math.random() * rawDelay * jitter + min);
       };

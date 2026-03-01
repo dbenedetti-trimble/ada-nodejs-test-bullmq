@@ -636,7 +636,7 @@ export class Worker<
    * the HALF_OPEN timer transition can both wake this up.
    */
   private async waitForCircuitBreaker(): Promise<void> {
-    if (this.circuitBreaker?.shouldAllowJob() === false) {
+    if (!this.closing && this.circuitBreaker?.shouldAllowJob() === false) {
       this.abortDelayController?.abort();
       this.abortDelayController = new AbortController();
 
