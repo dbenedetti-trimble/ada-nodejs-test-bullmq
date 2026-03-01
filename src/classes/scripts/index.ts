@@ -23,7 +23,12 @@ import {
   RedisJobOptions,
 } from '../../types';
 import { version as packageVersion } from '../../version';
-import { ScriptContext, isJobInList as isJobInListUtil } from './script-utils';
+import {
+  ScriptContext,
+  isJobInList as isJobInListUtil,
+  finishedErrors as finishedErrorsUtil,
+  getKeepJobs as getKeepJobsUtil,
+} from './script-utils';
 import { JobScripts } from './job-scripts';
 import { QueueScripts } from './queue-scripts';
 import { FlowScripts } from './flow-scripts';
@@ -679,13 +684,13 @@ export class Scripts {
     command: string;
     state?: string;
   }): Error {
-    return undefined as any;
+    return finishedErrorsUtil({ code, jobId, parentKey, command, state });
   }
 
   protected getKeepJobs(
     shouldRemove: undefined | boolean | number | KeepJobs,
     workerKeepJobs: undefined | KeepJobs,
   ): KeepJobs {
-    return undefined as any;
+    return getKeepJobsUtil(shouldRemove, workerKeepJobs);
   }
 }
