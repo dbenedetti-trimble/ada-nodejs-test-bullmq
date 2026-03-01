@@ -143,9 +143,8 @@ describe('JobGroup compensation', () => {
     await delay(3000);
 
     const groupState = await queue.getGroupState(groupNode.groupId);
-    // When the first job fails with no siblings completed, group goes to FAILED
-    // (or COMPENSATING then FAILED if no compensation jobs created)
-    expect(['FAILED', 'COMPENSATING']).toContain(groupState!.state);
+    // When the first job fails with no siblings completed, group goes directly to FAILED
+    expect(groupState!.state).toBe('FAILED');
   }, 30000);
 
   // VAL-08: Compensation jobs succeed → group transitions to FAILED

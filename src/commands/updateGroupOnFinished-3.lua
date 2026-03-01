@@ -65,6 +65,21 @@ if newStatus == "completed" and completedCount == totalJobs then
 end
 
 if newStatus == "failed" then
+  -- Extract jobId from jobKey for events
+  local jobId = jobKey:match(".*:(.+)")
+
+  -- If no completed siblings exist, transition directly to FAILED (VAL-07)
+  if completedCount == 0 then
+    redis.call("HSET", groupHashKey, "state", "FAILED", "updatedAt", timestamp)
+    redis.call("XADD", eventsKey, "*",
+      "event", "group:failed",
+      "groupId", groupId,
+      "groupName", groupName,
+      "state", "FAILED"
+    )
+    return nil
+  end
+
   redis.call("HSET", groupHashKey, "state", "COMPENSATING", "updatedAt", timestamp)
 
   -- Collect completed job keys for compensation
@@ -75,9 +90,6 @@ if newStatus == "failed" then
       table.insert(completedJobKeys, jobEntries[i])
     end
   end
-
-  -- Extract jobId from jobKey for the event
-  local jobId = jobKey:match(".*:(.+)")
 
   redis.call("XADD", eventsKey, "*",
     "event", "group:compensating",
