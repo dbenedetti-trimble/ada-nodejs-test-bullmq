@@ -3,6 +3,9 @@ import { ChainableCommander } from 'ioredis';
 import { ScriptQueueContext } from '../../interfaces/script-queue-context';
 import { RedisClient } from '../../interfaces/connection';
 import { KeepJobs } from '../../types';
+import { ErrorCode } from '../../enums';
+import { array2obj, isRedisVersionLowerThan } from '../../utils';
+import { UnrecoverableError } from '../errors';
 
 const packer = new Packr({
   useRecords: false,
@@ -19,31 +22,118 @@ export interface ScriptContext extends ScriptQueueContext {
   ): any;
 }
 
-export function raw2NextJobData(_raw: any[]): any[] {
-  throw new Error('stub: raw2NextJobData not yet implemented');
+export function raw2NextJobData(raw: any[]): any[] {
+  if (raw) {
+    const result = [null, raw[1], raw[2], raw[3]];
+    if (raw[0]) {
+      result[0] = array2obj(raw[0]);
+    }
+    return result;
+  }
+  return [];
 }
 
-export function finishedErrors(_params: {
+export function finishedErrors({
+  code,
+  jobId,
+  parentKey,
+  command,
+  state,
+}: {
   code: number;
   jobId?: string;
   parentKey?: string;
   command: string;
   state?: string;
 }): Error {
-  throw new Error('stub: finishedErrors not yet implemented');
+  let error: Error;
+  switch (code) {
+    case ErrorCode.JobNotExist:
+      error = new Error(`Missing key for job ${jobId}. ${command}`);
+      break;
+    case ErrorCode.JobLockNotExist:
+      error = new Error(`Missing lock for job ${jobId}. ${command}`);
+      break;
+    case ErrorCode.JobNotInState:
+      error = new Error(
+        `Job ${jobId} is not in the ${state} state. ${command}`,
+      );
+      break;
+    case ErrorCode.JobPendingChildren:
+      error = new Error(`Job ${jobId} has pending dependencies. ${command}`);
+      break;
+    case ErrorCode.ParentJobNotExist:
+      error = new Error(
+        `Missing key for parent job ${parentKey}. ${command}`,
+      );
+      break;
+    case ErrorCode.JobLockMismatch:
+      error = new Error(
+        `Lock mismatch for job ${jobId}. Cmd ${command} from ${state}`,
+      );
+      break;
+    case ErrorCode.ParentJobCannotBeReplaced:
+      error = new Error(
+        `The parent job ${parentKey} cannot be replaced. ${command}`,
+      );
+      break;
+    case ErrorCode.JobBelongsToJobScheduler:
+      error = new Error(
+        `Job ${jobId} belongs to a job scheduler and cannot be removed directly. ${command}`,
+      );
+      break;
+    case ErrorCode.JobHasFailedChildren:
+      error = new UnrecoverableError(
+        `Cannot complete job ${jobId} because it has at least one failed child. ${command}`,
+      );
+      break;
+    case ErrorCode.SchedulerJobIdCollision:
+      error = new Error(
+        `Cannot create job scheduler iteration - job ID already exists. ${command}`,
+      );
+      break;
+    case ErrorCode.SchedulerJobSlotsBusy:
+      error = new Error(
+        `Cannot create job scheduler iteration - current and next time slots already have jobs. ${command}`,
+      );
+      break;
+    default:
+      error = new Error(
+        `Unknown code ${code} error for ${jobId}. ${command}`,
+      );
+  }
+  (error as any).code = code;
+  return error;
 }
 
 export function getKeepJobs(
-  _shouldRemove: undefined | boolean | number | KeepJobs,
-  _workerKeepJobs: undefined | KeepJobs,
+  shouldRemove: undefined | boolean | number | KeepJobs,
+  workerKeepJobs: undefined | KeepJobs,
 ): KeepJobs {
-  throw new Error('stub: getKeepJobs not yet implemented');
+  if (typeof shouldRemove === 'undefined') {
+    return workerKeepJobs || { count: shouldRemove ? 0 : -1 };
+  }
+
+  return typeof shouldRemove === 'object'
+    ? shouldRemove
+    : typeof shouldRemove === 'number'
+      ? { count: shouldRemove }
+      : { count: shouldRemove ? 0 : -1 };
 }
 
 export async function isJobInList(
-  _ctx: ScriptContext,
-  _listKey: string,
-  _jobId: string,
+  ctx: ScriptContext,
+  listKey: string,
+  jobId: string,
 ): Promise<boolean> {
-  throw new Error('stub: isJobInList not yet implemented');
+  const client = await ctx.client;
+  let result;
+  if (
+    isRedisVersionLowerThan(ctx.redisVersion, '6.0.6', ctx.databaseType)
+  ) {
+    result = await ctx.execCommand(client, 'isJobInList', [listKey, jobId]);
+  } else {
+    result = await client.lpos(listKey, jobId);
+  }
+  return Number.isInteger(result);
 }

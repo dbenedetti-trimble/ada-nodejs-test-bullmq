@@ -11,202 +11,624 @@ import {
   JobState,
   RedisJobOptions,
   JobProgress,
-  KeepJobs,
 } from '../../types';
-import { ScriptContext } from './script-utils';
+import { isRedisVersionLowerThan, objectToFlatArray } from '../../utils';
+import { ScriptContext, finishedErrors, pack } from './script-utils';
 
 export class JobScripts {
   constructor(private ctx: ScriptContext) {}
 
   protected addStandardJobArgs(
-    _job: JobJson,
-    _encodedOpts: any,
-    _args: (string | number | Record<string, any>)[],
+    job: JobJson,
+    encodedOpts: any,
+    args: (string | number | Record<string, any>)[],
   ): (string | Buffer)[] {
-    throw new Error('stub');
+    const queueKeys = this.ctx.keys;
+    const keys: (string | Buffer)[] = [
+      queueKeys.wait,
+      queueKeys.paused,
+      queueKeys.meta,
+      queueKeys.id,
+      queueKeys.completed,
+      queueKeys.delayed,
+      queueKeys.active,
+      queueKeys.events,
+      queueKeys.marker,
+    ];
+
+    keys.push(pack(args), job.data, encodedOpts);
+
+    return keys;
   }
 
   protected addStandardJob(
-    _client: RedisClient,
-    _job: JobJson,
-    _encodedOpts: any,
-    _args: (string | number | Record<string, any>)[],
+    client: RedisClient,
+    job: JobJson,
+    encodedOpts: any,
+    args: (string | number | Record<string, any>)[],
   ): Promise<string | number> {
-    throw new Error('stub');
+    const argsList = this.addStandardJobArgs(job, encodedOpts, args);
+
+    return this.ctx.execCommand(client, 'addStandardJob', argsList);
   }
 
   protected addDelayedJobArgs(
-    _job: JobJson,
-    _encodedOpts: any,
-    _args: (string | number | Record<string, any>)[],
+    job: JobJson,
+    encodedOpts: any,
+    args: (string | number | Record<string, any>)[],
   ): (string | Buffer)[] {
-    throw new Error('stub');
+    const queueKeys = this.ctx.keys;
+    const keys: (string | Buffer)[] = [
+      queueKeys.marker,
+      queueKeys.meta,
+      queueKeys.id,
+      queueKeys.delayed,
+      queueKeys.completed,
+      queueKeys.events,
+    ];
+
+    keys.push(pack(args), job.data, encodedOpts);
+
+    return keys;
   }
 
   protected addDelayedJob(
-    _client: RedisClient,
-    _job: JobJson,
-    _encodedOpts: any,
-    _args: (string | number | Record<string, any>)[],
+    client: RedisClient,
+    job: JobJson,
+    encodedOpts: any,
+    args: (string | number | Record<string, any>)[],
   ): Promise<string | number> {
-    throw new Error('stub');
+    const argsList = this.addDelayedJobArgs(job, encodedOpts, args);
+
+    return this.ctx.execCommand(client, 'addDelayedJob', argsList);
   }
 
   protected addPrioritizedJobArgs(
-    _job: JobJson,
-    _encodedOpts: any,
-    _args: (string | number | Record<string, any>)[],
+    job: JobJson,
+    encodedOpts: any,
+    args: (string | number | Record<string, any>)[],
   ): (string | Buffer)[] {
-    throw new Error('stub');
+    const queueKeys = this.ctx.keys;
+    const keys: (string | Buffer)[] = [
+      queueKeys.marker,
+      queueKeys.meta,
+      queueKeys.id,
+      queueKeys.prioritized,
+      queueKeys.delayed,
+      queueKeys.completed,
+      queueKeys.active,
+      queueKeys.events,
+      queueKeys.pc,
+    ];
+
+    keys.push(pack(args), job.data, encodedOpts);
+
+    return keys;
   }
 
   protected addPrioritizedJob(
-    _client: RedisClient,
-    _job: JobJson,
-    _encodedOpts: any,
-    _args: (string | number | Record<string, any>)[],
+    client: RedisClient,
+    job: JobJson,
+    encodedOpts: any,
+    args: (string | number | Record<string, any>)[],
   ): Promise<string | number> {
-    throw new Error('stub');
+    const argsList = this.addPrioritizedJobArgs(job, encodedOpts, args);
+
+    return this.ctx.execCommand(client, 'addPrioritizedJob', argsList);
   }
 
   protected addParentJobArgs(
-    _job: JobJson,
-    _encodedOpts: any,
-    _args: (string | number | Record<string, any>)[],
+    job: JobJson,
+    encodedOpts: any,
+    args: (string | number | Record<string, any>)[],
   ): (string | Buffer)[] {
-    throw new Error('stub');
+    const queueKeys = this.ctx.keys;
+    const keys: (string | Buffer)[] = [
+      queueKeys.meta,
+      queueKeys.id,
+      queueKeys.delayed,
+      queueKeys['waiting-children'],
+      queueKeys.completed,
+      queueKeys.events,
+    ];
+
+    keys.push(pack(args), job.data, encodedOpts);
+
+    return keys;
   }
 
   protected addParentJob(
-    _client: RedisClient,
-    _job: JobJson,
-    _encodedOpts: any,
-    _args: (string | number | Record<string, any>)[],
+    client: RedisClient,
+    job: JobJson,
+    encodedOpts: any,
+    args: (string | number | Record<string, any>)[],
   ): Promise<string | number> {
-    throw new Error('stub');
+    const argsList = this.addParentJobArgs(job, encodedOpts, args);
+
+    return this.ctx.execCommand(client, 'addParentJob', argsList);
   }
 
   async addJob(
-    _client: RedisClient,
-    _job: JobJson,
-    _opts: RedisJobOptions,
-    _jobId: string,
-    _parentKeyOpts: ParentKeyOpts = {},
+    client: RedisClient,
+    job: JobJson,
+    opts: RedisJobOptions,
+    jobId: string,
+    parentKeyOpts: ParentKeyOpts = {},
   ): Promise<string> {
-    throw new Error('stub');
+    const queueKeys = this.ctx.keys;
+
+    const parent: Record<string, any> = job.parent;
+
+    const args = [
+      queueKeys[''],
+      typeof jobId !== 'undefined' ? jobId : '',
+      job.name,
+      job.timestamp,
+      job.parentKey || null,
+      parentKeyOpts.parentDependenciesKey || null,
+      parent,
+      job.repeatJobKey,
+      job.deduplicationId ? `${queueKeys.de}:${job.deduplicationId}` : null,
+    ];
+
+    let encodedOpts;
+    if (opts.repeat) {
+      const repeat = {
+        ...opts.repeat,
+      };
+
+      if (repeat.startDate) {
+        repeat.startDate = +new Date(repeat.startDate);
+      }
+      if (repeat.endDate) {
+        repeat.endDate = +new Date(repeat.endDate);
+      }
+
+      encodedOpts = pack({
+        ...opts,
+        repeat,
+      });
+    } else {
+      encodedOpts = pack(opts);
+    }
+
+    let result: string | number;
+
+    if (parentKeyOpts.addToWaitingChildren) {
+      result = await this.addParentJob(client, job, encodedOpts, args);
+    } else if (typeof opts.delay == 'number' && opts.delay > 0) {
+      result = await this.addDelayedJob(client, job, encodedOpts, args);
+    } else if (opts.priority) {
+      result = await this.addPrioritizedJob(client, job, encodedOpts, args);
+    } else {
+      result = await this.addStandardJob(client, job, encodedOpts, args);
+    }
+
+    if (<number>result < 0) {
+      throw finishedErrors({
+        code: <number>result,
+        parentKey: parentKeyOpts.parentKey,
+        command: 'addJob',
+      });
+    }
+
+    return <string>result;
   }
 
   private removeArgs(
-    _jobId: string,
-    _removeChildren: boolean,
+    jobId: string,
+    removeChildren: boolean,
   ): (string | number)[] {
-    throw new Error('stub');
+    const keys: (string | number)[] = [jobId, 'repeat'].map(name =>
+      this.ctx.toKey(name),
+    );
+
+    const args = [jobId, removeChildren ? 1 : 0, this.ctx.toKey('')];
+
+    return keys.concat(args);
   }
 
-  async remove(_jobId: string, _removeChildren: boolean): Promise<number> {
-    throw new Error('stub');
+  async remove(jobId: string, removeChildren: boolean): Promise<number> {
+    const client = await this.ctx.client;
+
+    const args = this.removeArgs(jobId, removeChildren);
+    const result = await this.ctx.execCommand(client, 'removeJob', args);
+
+    if (result < 0) {
+      throw finishedErrors({
+        code: result,
+        jobId,
+        command: 'removeJob',
+      });
+    }
+
+    return result;
   }
 
-  async removeUnprocessedChildren(_jobId: string): Promise<void> {
-    throw new Error('stub');
+  async removeUnprocessedChildren(jobId: string): Promise<void> {
+    const client = await this.ctx.client;
+
+    const args = [
+      this.ctx.toKey(jobId),
+      this.ctx.keys.meta,
+      this.ctx.toKey(''),
+      jobId,
+    ];
+
+    await this.ctx.execCommand(client, 'removeUnprocessedChildren', args);
   }
 
   async updateData<T = any, R = any, N extends string = string>(
-    _job: MinimalJob<T, R, N>,
-    _data: T,
+    job: MinimalJob<T, R, N>,
+    data: T,
   ): Promise<void> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const keys = [this.ctx.toKey(job.id)];
+    const dataJson = JSON.stringify(data);
+
+    const result = await this.ctx.execCommand(
+      client,
+      'updateData',
+      keys.concat([dataJson]),
+    );
+
+    if (result < 0) {
+      throw finishedErrors({
+        code: result,
+        jobId: job.id,
+        command: 'updateData',
+      });
+    }
   }
 
-  async updateProgress(_jobId: string, _progress: JobProgress): Promise<void> {
-    throw new Error('stub');
+  async updateProgress(jobId: string, progress: JobProgress): Promise<void> {
+    const client = await this.ctx.client;
+
+    const keys = [
+      this.ctx.toKey(jobId),
+      this.ctx.keys.events,
+      this.ctx.keys.meta,
+    ];
+    const progressJson = JSON.stringify(progress);
+
+    const result = await this.ctx.execCommand(
+      client,
+      'updateProgress',
+      keys.concat([jobId, progressJson]),
+    );
+
+    if (result < 0) {
+      throw finishedErrors({
+        code: result,
+        jobId,
+        command: 'updateProgress',
+      });
+    }
   }
 
   async addLog(
-    _jobId: string,
-    _logRow: string,
-    _keepLogs?: number,
+    jobId: string,
+    logRow: string,
+    keepLogs?: number,
   ): Promise<number> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const keys: (string | number)[] = [
+      this.ctx.toKey(jobId),
+      this.ctx.toKey(jobId) + ':logs',
+    ];
+
+    const result = await this.ctx.execCommand(
+      client,
+      'addLog',
+      keys.concat([jobId, logRow, keepLogs ? keepLogs : '']),
+    );
+
+    if (result < 0) {
+      throw finishedErrors({
+        code: result,
+        jobId,
+        command: 'addLog',
+      });
+    }
+
+    return result;
   }
 
   async isFinished(
-    _jobId: string,
-    _returnValue?: boolean,
+    jobId: string,
+    returnValue = false,
   ): Promise<number | [number, string]> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const keys = ['completed', 'failed', jobId].map((key: string) => {
+      return this.ctx.toKey(key);
+    });
+
+    return this.ctx.execCommand(
+      client,
+      'isFinished',
+      keys.concat([jobId, returnValue ? '1' : '']),
+    );
   }
 
-  async getState(_jobId: string): Promise<JobState | 'unknown'> {
-    throw new Error('stub');
+  async getState(jobId: string): Promise<JobState | 'unknown'> {
+    const client = await this.ctx.client;
+
+    const keys = [
+      'completed',
+      'failed',
+      'delayed',
+      'active',
+      'wait',
+      'paused',
+      'waiting-children',
+      'prioritized',
+    ].map((key: string) => {
+      return this.ctx.toKey(key);
+    });
+
+    if (
+      isRedisVersionLowerThan(
+        this.ctx.redisVersion,
+        '6.0.6',
+        this.ctx.databaseType,
+      )
+    ) {
+      return this.ctx.execCommand(client, 'getState', keys.concat([jobId]));
+    }
+    return this.ctx.execCommand(client, 'getStateV2', keys.concat([jobId]));
   }
 
-  async changeDelay(_jobId: string, _delay: number): Promise<void> {
-    throw new Error('stub');
+  /**
+   * Change delay of a delayed job.
+   *
+   * Reschedules a delayed job by setting a new delay from the current time.
+   * For example, calling changeDelay(5000) will reschedule the job to execute
+   * 5000 milliseconds (5 seconds) from now, regardless of the original delay.
+   *
+   * @param jobId - the ID of the job to change the delay for.
+   * @param delay - milliseconds from now when the job should be processed.
+   * @returns delay in milliseconds.
+   * @throws JobNotExist
+   * This exception is thrown if jobId is missing.
+   * @throws JobNotInState
+   * This exception is thrown if job is not in delayed state.
+   */
+  async changeDelay(jobId: string, delay: number): Promise<void> {
+    const client = await this.ctx.client;
+
+    const args = this.changeDelayArgs(jobId, delay);
+    const result = await this.ctx.execCommand(client, 'changeDelay', args);
+    if (result < 0) {
+      throw finishedErrors({
+        code: result,
+        jobId,
+        command: 'changeDelay',
+        state: 'delayed',
+      });
+    }
   }
 
   private changeDelayArgs(
-    _jobId: string,
-    _delay: number,
+    jobId: string,
+    delay: number,
   ): (string | number)[] {
-    throw new Error('stub');
+    const timestamp = Date.now();
+
+    const keys: (string | number)[] = [
+      this.ctx.keys.delayed,
+      this.ctx.keys.meta,
+      this.ctx.keys.marker,
+      this.ctx.keys.events,
+    ];
+
+    return keys.concat([
+      delay,
+      JSON.stringify(timestamp),
+      jobId,
+      this.ctx.toKey(jobId),
+    ]);
   }
 
   async changePriority(
-    _jobId: string,
-    _priority?: number,
-    _lifo?: boolean,
+    jobId: string,
+    priority = 0,
+    lifo = false,
   ): Promise<void> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const args = this.changePriorityArgs(jobId, priority, lifo);
+
+    const result = await this.ctx.execCommand(client, 'changePriority', args);
+    if (result < 0) {
+      throw finishedErrors({
+        code: result,
+        jobId,
+        command: 'changePriority',
+      });
+    }
   }
 
   protected changePriorityArgs(
-    _jobId: string,
-    _priority?: number,
-    _lifo?: boolean,
+    jobId: string,
+    priority = 0,
+    lifo = false,
   ): (string | number)[] {
-    throw new Error('stub');
+    const keys: (string | number)[] = [
+      this.ctx.keys.wait,
+      this.ctx.keys.paused,
+      this.ctx.keys.meta,
+      this.ctx.keys.prioritized,
+      this.ctx.keys.active,
+      this.ctx.keys.pc,
+      this.ctx.keys.marker,
+    ];
+
+    return keys.concat([priority, this.ctx.toKey(''), jobId, lifo ? 1 : 0]);
   }
 
   retryJobArgs(
-    _jobId: string,
-    _lifo: boolean,
-    _token: string,
-    _opts?: MoveToDelayedOpts,
+    jobId: string,
+    lifo: boolean,
+    token: string,
+    opts: MoveToDelayedOpts = {},
   ): (string | number | Buffer)[] {
-    throw new Error('stub');
+    const keys: (string | number | Buffer)[] = [
+      this.ctx.keys.active,
+      this.ctx.keys.wait,
+      this.ctx.keys.paused,
+      this.ctx.toKey(jobId),
+      this.ctx.keys.meta,
+      this.ctx.keys.events,
+      this.ctx.keys.delayed,
+      this.ctx.keys.prioritized,
+      this.ctx.keys.pc,
+      this.ctx.keys.marker,
+      this.ctx.keys.stalled,
+    ];
+
+    const pushCmd = (lifo ? 'R' : 'L') + 'PUSH';
+
+    return keys.concat([
+      this.ctx.toKey(''),
+      Date.now(),
+      pushCmd,
+      jobId,
+      token,
+      opts.fieldsToUpdate
+        ? pack(objectToFlatArray(opts.fieldsToUpdate))
+        : void 0,
+    ]);
   }
 
   async retryJob(
-    _jobId: string,
-    _lifo: boolean,
-    _token?: string,
-    _opts?: RetryJobOpts,
+    jobId: string,
+    lifo: boolean,
+    token = '0',
+    opts: RetryJobOpts = {},
   ): Promise<void> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const args = this.retryJobArgs(jobId, lifo, token, opts);
+    const result = await this.ctx.execCommand(client, 'retryJob', args);
+    if (result < 0) {
+      throw finishedErrors({
+        code: result,
+        jobId,
+        command: 'retryJob',
+        state: 'active',
+      });
+    }
   }
 
+  /**
+   * Attempts to reprocess a job
+   *
+   * @param job - The job to reprocess
+   * @param state - The expected job state. If the job is not found
+   * on the provided state, then it's not reprocessed. Supported states: 'failed', 'completed'
+   *
+   * @returns A promise that resolves when the job has been successfully moved to the wait queue.
+   * @throws Will throw an error with a code property indicating the failure reason:
+   *   - code 0: Job does not exist
+   *   - code -1: Job is currently locked and can't be retried
+   *   - code -2: Job was not found in the expected set
+   */
   async reprocessJob<T = any, R = any, N extends string = string>(
-    _job: MinimalJob<T, R, N>,
-    _state: 'failed' | 'completed',
-    _opts?: RetryOptions,
+    job: MinimalJob<T, R, N>,
+    state: 'failed' | 'completed',
+    opts: RetryOptions = {},
   ): Promise<void> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const keys = [
+      this.ctx.toKey(job.id),
+      this.ctx.keys.events,
+      this.ctx.toKey(state),
+      this.ctx.keys.wait,
+      this.ctx.keys.meta,
+      this.ctx.keys.paused,
+      this.ctx.keys.active,
+      this.ctx.keys.marker,
+    ];
+
+    const args = [
+      job.id,
+      (job.opts.lifo ? 'R' : 'L') + 'PUSH',
+      state === 'failed' ? 'failedReason' : 'returnvalue',
+      state,
+      opts.resetAttemptsMade ? '1' : '0',
+      opts.resetAttemptsStarted ? '1' : '0',
+    ];
+
+    const result = await this.ctx.execCommand(
+      client,
+      'reprocessJob',
+      keys.concat(args),
+    );
+
+    switch (result) {
+      case 1:
+        return;
+      default:
+        throw finishedErrors({
+          code: result,
+          jobId: job.id,
+          command: 'reprocessJob',
+          state,
+        });
+    }
   }
 
-  async promote(_jobId: string): Promise<void> {
-    throw new Error('stub');
+  async promote(jobId: string): Promise<void> {
+    const client = await this.ctx.client;
+
+    const keys = [
+      this.ctx.keys.delayed,
+      this.ctx.keys.wait,
+      this.ctx.keys.paused,
+      this.ctx.keys.meta,
+      this.ctx.keys.prioritized,
+      this.ctx.keys.active,
+      this.ctx.keys.pc,
+      this.ctx.keys.events,
+      this.ctx.keys.marker,
+    ];
+
+    const args = [this.ctx.toKey(''), jobId];
+
+    const code = await this.ctx.execCommand(
+      client,
+      'promote',
+      keys.concat(args),
+    );
+    if (code < 0) {
+      throw finishedErrors({
+        code,
+        jobId,
+        command: 'promote',
+        state: 'delayed',
+      });
+    }
   }
 
   async removeDeduplicationKey(
-    _deduplicationId: string,
-    _jobId: string,
+    deduplicationId: string,
+    jobId: string,
   ): Promise<number> {
-    throw new Error('stub');
-  }
+    const client = await this.ctx.client;
+    const queueKeys = this.ctx.keys;
 
-  // Suppress unused warning for ctx
-  private _getCtx(): ScriptContext {
-    return this.ctx;
+    const keys: string[] = [`${queueKeys.de}:${deduplicationId}`];
+
+    const args = [jobId];
+
+    return this.ctx.execCommand(
+      client,
+      'removeDeduplicationKey',
+      keys.concat(args),
+    );
   }
 }

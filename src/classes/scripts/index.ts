@@ -23,7 +23,12 @@ import {
   RedisJobOptions,
 } from '../../types';
 import { version as packageVersion } from '../../version';
-import { ScriptContext, isJobInList } from './script-utils';
+import {
+  ScriptContext,
+  isJobInList,
+  finishedErrors,
+  getKeepJobs,
+} from './script-utils';
 import { JobScripts } from './job-scripts';
 import { QueueScripts } from './queue-scripts';
 import { FlowScripts } from './flow-scripts';
@@ -700,7 +705,6 @@ export class Scripts {
     command: string;
     state?: string;
   }): Error {
-    const { finishedErrors } = require('./script-utils');
     return finishedErrors({ code, jobId, parentKey, command, state });
   }
 
@@ -708,7 +712,6 @@ export class Scripts {
     shouldRemove: undefined | boolean | number | KeepJobs,
     workerKeepJobs: undefined | KeepJobs,
   ): KeepJobs {
-    const { getKeepJobs } = require('./script-utils');
     return getKeepJobs(shouldRemove, workerKeepJobs);
   }
 }

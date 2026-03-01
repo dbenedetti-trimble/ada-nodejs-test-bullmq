@@ -1,54 +1,135 @@
 import { MoveToWaitingChildrenOpts } from '../../interfaces';
-import { ScriptContext } from './script-utils';
+import { getParentKey } from '../../utils';
+import { ScriptContext, finishedErrors } from './script-utils';
 
 export class FlowScripts {
   constructor(private ctx: ScriptContext) {}
 
   private removeChildDependencyArgs(
-    _jobId: string,
-    _parentKey: string,
+    jobId: string,
+    parentKey: string,
   ): (string | number)[] {
-    throw new Error('stub');
+    const queueKeys = this.ctx.keys;
+
+    const keys: string[] = [queueKeys['']];
+
+    const args = [this.ctx.toKey(jobId), parentKey];
+
+    return keys.concat(args);
   }
 
   async removeChildDependency(
-    _jobId: string,
-    _parentKey: string,
+    jobId: string,
+    parentKey: string,
   ): Promise<boolean> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+    const args = this.removeChildDependencyArgs(jobId, parentKey);
+
+    const result = await this.ctx.execCommand(
+      client,
+      'removeChildDependency',
+      args,
+    );
+
+    switch (result) {
+      case 0:
+        return true;
+      case 1:
+        return false;
+      default:
+        throw finishedErrors({
+          code: result,
+          jobId,
+          parentKey,
+          command: 'removeChildDependency',
+        });
+    }
   }
 
   moveToWaitingChildrenArgs(
-    _jobId: string,
-    _token: string,
-    _opts?: MoveToWaitingChildrenOpts,
+    jobId: string,
+    token: string,
+    opts?: MoveToWaitingChildrenOpts,
   ): (string | number)[] {
-    throw new Error('stub');
+    const timestamp = Date.now();
+
+    const childKey = getParentKey(opts.child);
+
+    const keys: (string | number)[] = [
+      'active',
+      'waiting-children',
+      jobId,
+      `${jobId}:dependencies`,
+      `${jobId}:unsuccessful`,
+      'stalled',
+      'events',
+    ].map(name => {
+      return this.ctx.toKey(name);
+    });
+
+    return keys.concat([
+      token,
+      childKey ?? '',
+      JSON.stringify(timestamp),
+      jobId,
+      this.ctx.toKey(''),
+    ]);
   }
 
   async moveToWaitingChildren(
-    _jobId: string,
-    _token: string,
-    _opts?: MoveToWaitingChildrenOpts,
+    jobId: string,
+    token: string,
+    opts: MoveToWaitingChildrenOpts = {},
   ): Promise<boolean> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const args = this.moveToWaitingChildrenArgs(jobId, token, opts);
+    const result = await this.ctx.execCommand(
+      client,
+      'moveToWaitingChildren',
+      args,
+    );
+
+    switch (result) {
+      case 0:
+        return true;
+      case 1:
+        return false;
+      default:
+        throw finishedErrors({
+          code: result,
+          jobId,
+          command: 'moveToWaitingChildren',
+          state: 'active',
+        });
+    }
   }
 
   protected getDependencyCountsArgs(
-    _jobId: string,
-    _types: string[],
+    jobId: string,
+    types: string[],
   ): (string | number)[] {
-    throw new Error('stub');
+    const keys: string[] = [
+      `${jobId}:processed`,
+      `${jobId}:dependencies`,
+      `${jobId}:failed`,
+      `${jobId}:unsuccessful`,
+    ].map(name => {
+      return this.ctx.toKey(name);
+    });
+
+    const args = types;
+
+    return keys.concat(args);
   }
 
   async getDependencyCounts(
-    _jobId: string,
-    _types: string[],
+    jobId: string,
+    types: string[],
   ): Promise<number[]> {
-    throw new Error('stub');
-  }
+    const client = await this.ctx.client;
+    const args = this.getDependencyCountsArgs(jobId, types);
 
-  private _getCtx(): ScriptContext {
-    return this.ctx;
+    return await this.ctx.execCommand(client, 'getDependencyCounts', args);
   }
 }

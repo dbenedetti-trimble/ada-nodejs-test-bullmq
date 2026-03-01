@@ -3,13 +3,21 @@ import {
   MinimalJob,
   RedisClient,
   MoveToDelayedOpts,
+  WorkerOptions,
 } from '../../interfaces';
 import {
   FinishedPropValAttribute,
   FinishedStatus,
   KeepJobs,
 } from '../../types';
-import { ScriptContext } from './script-utils';
+import { objectToFlatArray } from '../../utils';
+import {
+  ScriptContext,
+  finishedErrors,
+  getKeepJobs,
+  raw2NextJobData,
+  pack,
+} from './script-utils';
 
 export class WorkerScripts {
   moveToFinishedKeys: (string | undefined)[];
@@ -35,117 +43,332 @@ export class WorkerScripts {
   }
 
   async extendLock(
-    _jobId: string,
-    _token: string,
-    _duration: number,
-    _client?: RedisClient | ChainableCommander,
+    jobId: string,
+    token: string,
+    duration: number,
+    client?: RedisClient | ChainableCommander,
   ): Promise<number> {
-    throw new Error('stub');
+    client = client || (await this.ctx.client);
+    const args = [
+      this.ctx.toKey(jobId) + ':lock',
+      this.ctx.keys.stalled,
+      token,
+      duration,
+      jobId,
+    ];
+    return this.ctx.execCommand(client, 'extendLock', args);
   }
 
   async extendLocks(
-    _jobIds: string[],
-    _tokens: string[],
-    _duration: number,
+    jobIds: string[],
+    tokens: string[],
+    duration: number,
   ): Promise<string[]> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const args = [
+      this.ctx.keys.stalled,
+      this.ctx.toKey(''),
+      pack(tokens),
+      pack(jobIds),
+      duration,
+    ];
+
+    return this.ctx.execCommand(client, 'extendLocks', args);
   }
 
   async moveToActive(
-    _client: RedisClient,
-    _token: string,
-    _name?: string,
+    client: RedisClient,
+    token: string,
+    name?: string,
   ): Promise<any> {
-    throw new Error('stub');
+    const opts = this.ctx.opts as WorkerOptions;
+
+    const queueKeys = this.ctx.keys;
+    const keys = [
+      queueKeys.wait,
+      queueKeys.active,
+      queueKeys.prioritized,
+      queueKeys.events,
+      queueKeys.stalled,
+      queueKeys.limiter,
+      queueKeys.delayed,
+      queueKeys.paused,
+      queueKeys.meta,
+      queueKeys.pc,
+      queueKeys.marker,
+    ];
+
+    const args: (string | number | boolean | Buffer)[] = [
+      queueKeys[''],
+      Date.now(),
+      pack({
+        token,
+        lockDuration: opts.lockDuration,
+        limiter: opts.limiter,
+        name,
+      }),
+    ];
+
+    const result = await this.ctx.execCommand(
+      client,
+      'moveToActive',
+      (<(string | number | boolean | Buffer)[]>keys).concat(args),
+    );
+
+    return raw2NextJobData(result);
   }
 
   protected moveToFinishedArgs<T = any, R = any, N extends string = string>(
-    _job: MinimalJob<T, R, N>,
-    _val: any,
-    _propVal: FinishedPropValAttribute,
-    _shouldRemove: undefined | boolean | number | KeepJobs,
-    _target: FinishedStatus,
-    _token: string,
-    _timestamp: number,
-    _fetchNext?: boolean,
-    _fieldsToUpdate?: Record<string, any>,
+    job: MinimalJob<T, R, N>,
+    val: any,
+    propVal: FinishedPropValAttribute,
+    shouldRemove: undefined | boolean | number | KeepJobs,
+    target: FinishedStatus,
+    token: string,
+    timestamp: number,
+    fetchNext = true,
+    fieldsToUpdate?: Record<string, any>,
   ): (string | number | boolean | Buffer)[] {
-    throw new Error('stub');
+    const queueKeys = this.ctx.keys;
+    const opts: WorkerOptions = <WorkerOptions>this.ctx.opts;
+    const workerKeepJobs =
+      target === 'completed' ? opts.removeOnComplete : opts.removeOnFail;
+
+    const metricsKey = this.ctx.toKey(`metrics:${target}`);
+
+    const keys = this.moveToFinishedKeys;
+    keys[10] = queueKeys[target];
+    keys[11] = this.ctx.toKey(job.id ?? '');
+    keys[12] = metricsKey;
+    keys[13] = this.ctx.keys.marker;
+
+    const keepJobsVal = getKeepJobs(shouldRemove, workerKeepJobs);
+
+    const args = [
+      job.id,
+      timestamp,
+      propVal,
+      typeof val === 'undefined' ? 'null' : val,
+      target,
+      !fetchNext || this.ctx.closing ? 0 : 1,
+      queueKeys[''],
+      pack({
+        token,
+        name: opts.name,
+        keepJobs: keepJobsVal,
+        limiter: opts.limiter,
+        lockDuration: opts.lockDuration,
+        attempts: job.opts.attempts,
+        maxMetricsSize: opts.metrics?.maxDataPoints
+          ? opts.metrics?.maxDataPoints
+          : '',
+        fpof: !!job.opts?.failParentOnFailure,
+        cpof: !!job.opts?.continueParentOnFailure,
+        idof: !!job.opts?.ignoreDependencyOnFailure,
+        rdof: !!job.opts?.removeDependencyOnFailure,
+      }),
+      fieldsToUpdate ? pack(objectToFlatArray(fieldsToUpdate)) : void 0,
+    ];
+
+    return keys.concat(args);
   }
 
   moveToCompletedArgs<T = any, R = any, N extends string = string>(
-    _job: MinimalJob<T, R, N>,
-    _returnvalue: R,
-    _removeOnComplete: boolean | number | KeepJobs,
-    _token: string,
-    _fetchNext?: boolean,
+    job: MinimalJob<T, R, N>,
+    returnvalue: R,
+    removeOnComplete: boolean | number | KeepJobs,
+    token: string,
+    fetchNext = false,
   ): (string | number | boolean | Buffer)[] {
-    throw new Error('stub');
+    const timestamp = Date.now();
+    return this.moveToFinishedArgs(
+      job,
+      returnvalue,
+      'returnvalue',
+      removeOnComplete,
+      'completed',
+      token,
+      timestamp,
+      fetchNext,
+    );
   }
 
   moveToFailedArgs<T = any, R = any, N extends string = string>(
-    _job: MinimalJob<T, R, N>,
-    _failedReason: string,
-    _removeOnFailed: boolean | number | KeepJobs,
-    _token: string,
-    _fetchNext?: boolean,
-    _fieldsToUpdate?: Record<string, any>,
+    job: MinimalJob<T, R, N>,
+    failedReason: string,
+    removeOnFailed: boolean | number | KeepJobs,
+    token: string,
+    fetchNext = false,
+    fieldsToUpdate?: Record<string, any>,
   ): (string | number | boolean | Buffer)[] {
-    throw new Error('stub');
+    const timestamp = Date.now();
+    return this.moveToFinishedArgs(
+      job,
+      failedReason,
+      'failedReason',
+      removeOnFailed,
+      'failed',
+      token,
+      timestamp,
+      fetchNext,
+      fieldsToUpdate,
+    );
   }
 
   async moveToFinished(
-    _jobId: string,
-    _args: (string | number | boolean | Buffer)[],
+    jobId: string,
+    args: (string | number | boolean | Buffer)[],
   ): Promise<any> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const result = await this.ctx.execCommand(client, 'moveToFinished', args);
+    if (result < 0) {
+      throw finishedErrors({
+        code: result,
+        jobId,
+        command: 'moveToFinished',
+        state: 'active',
+      });
+    } else {
+      if (typeof result !== 'undefined') {
+        return raw2NextJobData(result);
+      }
+    }
   }
 
   moveToDelayedArgs(
-    _jobId: string,
-    _timestamp: number,
-    _token: string,
-    _delay: number,
-    _opts?: MoveToDelayedOpts,
+    jobId: string,
+    timestamp: number,
+    token: string,
+    delay: number,
+    opts: MoveToDelayedOpts = {},
   ): (string | number | Buffer)[] {
-    throw new Error('stub');
+    const queueKeys = this.ctx.keys;
+
+    const keys: (string | number | Buffer)[] = [
+      queueKeys.marker,
+      queueKeys.active,
+      queueKeys.prioritized,
+      queueKeys.delayed,
+      this.ctx.toKey(jobId),
+      queueKeys.events,
+      queueKeys.meta,
+      queueKeys.stalled,
+    ];
+
+    return keys.concat([
+      this.ctx.keys[''],
+      timestamp,
+      jobId,
+      token,
+      delay,
+      opts.skipAttempt ? '1' : '0',
+      opts.fieldsToUpdate
+        ? pack(objectToFlatArray(opts.fieldsToUpdate))
+        : void 0,
+    ]);
   }
 
   async moveToDelayed(
-    _jobId: string,
-    _timestamp: number,
-    _delay: number,
-    _token?: string,
-    _opts?: MoveToDelayedOpts,
+    jobId: string,
+    timestamp: number,
+    delay: number,
+    token = '0',
+    opts: MoveToDelayedOpts = {},
   ): Promise<void> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const args = this.moveToDelayedArgs(jobId, timestamp, token, delay, opts);
+
+    const result = await this.ctx.execCommand(client, 'moveToDelayed', args);
+    if (result < 0) {
+      throw finishedErrors({
+        code: result,
+        jobId,
+        command: 'moveToDelayed',
+        state: 'active',
+      });
+    }
   }
 
   protected moveStalledJobsToWaitArgs(): (string | number)[] {
-    throw new Error('stub');
+    const opts = this.ctx.opts as WorkerOptions;
+    const keys: (string | number)[] = [
+      this.ctx.keys.stalled,
+      this.ctx.keys.wait,
+      this.ctx.keys.active,
+      this.ctx.keys['stalled-check'],
+      this.ctx.keys.meta,
+      this.ctx.keys.paused,
+      this.ctx.keys.marker,
+      this.ctx.keys.events,
+    ];
+    const args = [
+      opts.maxStalledCount,
+      this.ctx.toKey(''),
+      Date.now(),
+      opts.stalledInterval,
+    ];
+
+    return keys.concat(args);
   }
 
+  /**
+   * Looks for unlocked jobs in the active queue.
+   *
+   * The job was being worked on, but the worker process died and it failed to renew the lock.
+   * We call these jobs 'stalled'. This is the most common case. We resolve these by moving them
+   * back to wait to be re-processed. To prevent jobs from cycling endlessly between active and wait,
+   * (e.g. if the job handler keeps crashing),
+   * we limit the number stalled job recoveries to settings.maxStalledCount.
+   */
   async moveStalledJobsToWait(): Promise<string[]> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const args = this.moveStalledJobsToWaitArgs();
+
+    return this.ctx.execCommand(client, 'moveStalledJobsToWait', args);
   }
 
   protected moveJobsToWaitArgs(
-    _state: FinishedStatus | 'delayed',
-    _count: number,
-    _timestamp: number,
+    state: FinishedStatus | 'delayed',
+    count: number,
+    timestamp: number,
   ): (string | number)[] {
-    throw new Error('stub');
+    const keys: (string | number)[] = [
+      this.ctx.toKey(''),
+      this.ctx.keys.events,
+      this.ctx.toKey(state),
+      this.ctx.toKey('wait'),
+      this.ctx.toKey('paused'),
+      this.ctx.keys.meta,
+      this.ctx.keys.active,
+      this.ctx.keys.marker,
+    ];
+
+    const args = [count, timestamp, state];
+
+    return keys.concat(args);
   }
 
   async retryJobs(
-    _state?: FinishedStatus,
-    _count?: number,
-    _timestamp?: number,
+    state: FinishedStatus = 'failed',
+    count = 1000,
+    timestamp = new Date().getTime(),
   ): Promise<number> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const args = this.moveJobsToWaitArgs(state, count, timestamp);
+
+    return this.ctx.execCommand(client, 'moveJobsToWait', args);
   }
 
-  async promoteJobs(_count?: number): Promise<number> {
-    throw new Error('stub');
+  async promoteJobs(count = 1000): Promise<number> {
+    const client = await this.ctx.client;
+
+    const args = this.moveJobsToWaitArgs('delayed', count, Number.MAX_VALUE);
+
+    return this.ctx.execCommand(client, 'moveJobsToWait', args);
   }
 }

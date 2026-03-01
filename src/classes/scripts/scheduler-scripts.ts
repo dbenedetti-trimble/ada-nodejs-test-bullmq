@@ -1,95 +1,228 @@
 import { RedisClient, RepeatableOptions } from '../../interfaces';
 import { JobsOptions, RedisJobOptions } from '../../types';
-import { ScriptContext } from './script-utils';
+import { ScriptContext, finishedErrors, pack } from './script-utils';
 
 export class SchedulerScripts {
   constructor(private ctx: ScriptContext) {}
 
   protected addRepeatableJobArgs(
-    _customKey: string,
-    _nextMillis: number,
-    _opts: RepeatableOptions,
-    _legacyCustomKey: string,
+    customKey: string,
+    nextMillis: number,
+    opts: RepeatableOptions,
+    legacyCustomKey: string,
   ): (string | number | Buffer)[] {
-    throw new Error('stub');
+    const queueKeys = this.ctx.keys;
+    const keys: (string | number | Buffer)[] = [
+      queueKeys.repeat,
+      queueKeys.delayed,
+    ];
+
+    const args = [
+      nextMillis,
+      pack(opts),
+      legacyCustomKey,
+      customKey,
+      queueKeys[''],
+    ];
+
+    return keys.concat(args);
   }
 
   async addRepeatableJob(
-    _customKey: string,
-    _nextMillis: number,
-    _opts: RepeatableOptions,
-    _legacyCustomKey: string,
+    customKey: string,
+    nextMillis: number,
+    opts: RepeatableOptions,
+    legacyCustomKey: string,
   ): Promise<string> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const args = this.addRepeatableJobArgs(
+      customKey,
+      nextMillis,
+      opts,
+      legacyCustomKey,
+    );
+    return this.ctx.execCommand(client, 'addRepeatableJob', args);
   }
 
   async updateRepeatableJobMillis(
-    _client: RedisClient,
-    _customKey: string,
-    _nextMillis: number,
-    _legacyCustomKey: string,
+    client: RedisClient,
+    customKey: string,
+    nextMillis: number,
+    legacyCustomKey: string,
   ): Promise<string> {
-    throw new Error('stub');
+    const args = [
+      this.ctx.keys.repeat,
+      nextMillis,
+      customKey,
+      legacyCustomKey,
+    ];
+    return this.ctx.execCommand(client, 'updateRepeatableJobMillis', args);
   }
 
   private removeRepeatableArgs(
-    _legacyRepeatJobId: string,
-    _repeatConcatOptions: string,
-    _repeatJobKey: string,
+    legacyRepeatJobId: string,
+    repeatConcatOptions: string,
+    repeatJobKey: string,
   ): string[] {
-    throw new Error('stub');
+    const queueKeys = this.ctx.keys;
+
+    const keys = [queueKeys.repeat, queueKeys.delayed, queueKeys.events];
+
+    const args = [
+      legacyRepeatJobId,
+      this.getRepeatConcatOptions(repeatConcatOptions, repeatJobKey),
+      repeatJobKey,
+      queueKeys[''],
+    ];
+
+    return keys.concat(args);
   }
 
+  // TODO: remove this check in next breaking change
   getRepeatConcatOptions(
-    _repeatConcatOptions: string,
-    _repeatJobKey: string,
+    repeatConcatOptions: string,
+    repeatJobKey: string,
   ): string {
-    throw new Error('stub');
+    if (repeatJobKey && repeatJobKey.split(':').length > 2) {
+      return repeatJobKey;
+    }
+
+    return repeatConcatOptions;
   }
 
   async removeRepeatable(
-    _legacyRepeatJobId: string,
-    _repeatConcatOptions: string,
-    _repeatJobKey: string,
+    legacyRepeatJobId: string,
+    repeatConcatOptions: string,
+    repeatJobKey: string,
   ): Promise<number> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+    const args = this.removeRepeatableArgs(
+      legacyRepeatJobId,
+      repeatConcatOptions,
+      repeatJobKey,
+    );
+    return this.ctx.execCommand(client, 'removeRepeatable', args);
   }
 
   async addJobScheduler(
-    _jobSchedulerId: string,
-    _nextMillis: number,
-    _templateData: string,
-    _templateOpts: RedisJobOptions,
-    _opts: RepeatableOptions,
-    _delayedJobOpts: JobsOptions,
-    _producerId?: string,
+    jobSchedulerId: string,
+    nextMillis: number,
+    templateData: string,
+    templateOpts: RedisJobOptions,
+    opts: RepeatableOptions,
+    delayedJobOpts: JobsOptions,
+    // The job id of the job that produced this next iteration
+    producerId?: string,
   ): Promise<[string, number]> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+    const queueKeys = this.ctx.keys;
+
+    const keys: (string | number | Buffer)[] = [
+      queueKeys.repeat,
+      queueKeys.delayed,
+      queueKeys.wait,
+      queueKeys.paused,
+      queueKeys.meta,
+      queueKeys.prioritized,
+      queueKeys.marker,
+      queueKeys.id,
+      queueKeys.events,
+      queueKeys.pc,
+      queueKeys.active,
+    ];
+
+    const args = [
+      nextMillis,
+      pack(opts),
+      jobSchedulerId,
+      templateData,
+      pack(templateOpts),
+      pack(delayedJobOpts),
+      Date.now(),
+      queueKeys[''],
+      producerId ? this.ctx.toKey(producerId) : '',
+    ];
+
+    const result = await this.ctx.execCommand(
+      client,
+      'addJobScheduler',
+      keys.concat(args),
+    );
+
+    if (typeof result === 'number' && result < 0) {
+      throw finishedErrors({
+        code: result,
+        command: 'addJobScheduler',
+      });
+    }
+
+    return result;
   }
 
   async updateJobSchedulerNextMillis(
-    _jobSchedulerId: string,
-    _nextMillis: number,
-    _templateData: string,
-    _delayedJobOpts: JobsOptions,
-    _producerId?: string,
+    jobSchedulerId: string,
+    nextMillis: number,
+    templateData: string,
+    delayedJobOpts: JobsOptions,
+    // The job id of the job that produced this next iteration - TODO: remove in next breaking change
+    producerId?: string,
   ): Promise<string | null> {
-    throw new Error('stub');
+    const client = await this.ctx.client;
+
+    const queueKeys = this.ctx.keys;
+
+    const keys: (string | number | Buffer)[] = [
+      queueKeys.repeat,
+      queueKeys.delayed,
+      queueKeys.wait,
+      queueKeys.paused,
+      queueKeys.meta,
+      queueKeys.prioritized,
+      queueKeys.marker,
+      queueKeys.id,
+      queueKeys.events,
+      queueKeys.pc,
+      producerId ? this.ctx.toKey(producerId) : '',
+      queueKeys.active,
+    ];
+
+    const args = [
+      nextMillis,
+      jobSchedulerId,
+      templateData,
+      pack(delayedJobOpts),
+      Date.now(),
+      queueKeys[''],
+      producerId,
+    ];
+
+    return this.ctx.execCommand(client, 'updateJobScheduler', keys.concat(args));
   }
 
-  async removeJobScheduler(_jobSchedulerId: string): Promise<number> {
-    throw new Error('stub');
+  async removeJobScheduler(jobSchedulerId: string): Promise<number> {
+    const client = await this.ctx.client;
+
+    const queueKeys = this.ctx.keys;
+
+    const keys = [queueKeys.repeat, queueKeys.delayed, queueKeys.events];
+
+    const args = [jobSchedulerId, queueKeys['']];
+
+    return this.ctx.execCommand(client, 'removeJobScheduler', keys.concat(args));
   }
 
-  getJobSchedulerArgs(_id: string): string[] {
-    throw new Error('stub');
+  getJobSchedulerArgs(id: string): string[] {
+    const keys: string[] = [this.ctx.keys.repeat];
+
+    return keys.concat([id]);
   }
 
-  async getJobScheduler(_id: string): Promise<[any, string | null]> {
-    throw new Error('stub');
-  }
+  async getJobScheduler(id: string): Promise<[any, string | null]> {
+    const client = await this.ctx.client;
 
-  private _getCtx(): ScriptContext {
-    return this.ctx;
+    const args = this.getJobSchedulerArgs(id);
+
+    return this.ctx.execCommand(client, 'getJobScheduler', args);
   }
 }
