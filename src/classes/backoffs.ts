@@ -77,7 +77,10 @@ export class Backoffs {
           (job?.data?.__bullmq_prevDelay as number) ?? baseDelay;
         const min = baseDelay;
         const max = prevDelay * 3;
-        const computed = Math.floor(Math.random() * (max - min) + min);
+        let computed = Math.floor(Math.random() * (max - min) + min);
+        if (opts.maxDelay && opts.maxDelay > 0) {
+          computed = Math.min(computed, opts.maxDelay);
+        }
         if (job?.data) {
           (job.data as Record<string, unknown>).__bullmq_prevDelay = computed;
         }
