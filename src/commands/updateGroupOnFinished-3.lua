@@ -37,8 +37,13 @@ if rcall("EXISTS", groupHashKey) == 0 then
   return {"none", "[]"}
 end
 
--- 2. HSET group jobs hash: jobKey = new status
-rcall("HSET", groupJobsKey, jobKey, status)
+-- 2. HSET group jobs hash: for completed, embed return value so siblings can
+--    read it without cross-key HGET calls. Format: "completed:<returnValueJson>"
+if status == "completed" then
+  rcall("HSET", groupJobsKey, jobKey, "completed:" .. (ARGV[4] or "null"))
+else
+  rcall("HSET", groupJobsKey, jobKey, status)
+end
 
 local data = rcall("HMGET", groupHashKey,
   "state", "totalJobs", "completedCount", "id", "name")
@@ -67,15 +72,18 @@ elseif status == "failed" then
   if currentState == "ACTIVE" then
     rcall("HSET", groupHashKey, "state", "COMPENSATING", "updatedAt", timestamp)
 
-    -- Collect all completed jobs with their names and return values
+    -- Collect all completed jobs with their names and return values.
+    -- Return values are embedded in the group jobs hash (see completed branch above)
+    -- to avoid cross-key HGET calls that fail in Redis Cluster.
     local allJobs = rcall("HGETALL", groupJobsKey)
     local completedJobs = {}
     for i = 1, #allJobs, 2 do
       local jKey = allJobs[i]
       local jStatus = allJobs[i+1]
-      if jStatus == "completed" then
+      if string.sub(jStatus, 1, 9) == "completed" then
         local jName = rcall("HGET", jKey, "name") or ""
-        local jReturn = rcall("HGET", jKey, "returnvalue") or "null"
+        local jReturn = string.sub(jStatus, 11) -- extract after "completed:"
+        if jReturn == "" then jReturn = "null" end
         local jId = string.match(jKey, ":([^:]+)$") or jKey
         table.insert(completedJobs, {
           jobKey = jKey,

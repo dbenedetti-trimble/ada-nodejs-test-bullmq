@@ -94,6 +94,14 @@ describe('JobGroup - Compensation Flow (GRP-4, GRP-5)', () => {
     const compWaitKey = `${prefix}:${queueName}-compensation:wait`;
     const compJobs = await connection.lrange(compWaitKey, 0, -1);
     expect(compJobs.length).toBeGreaterThanOrEqual(1);
+
+    // VAL-19: compensation job data must include originalReturnValue from completed job-a
+    const compJobId = compJobs[0];
+    const compJobKey = `${prefix}:${queueName}-compensation:${compJobId}`;
+    const compDataJson = await connection.hget(compJobKey, 'data');
+    expect(compDataJson).toBeTruthy();
+    const compData = JSON.parse(compDataJson!);
+    expect(compData.originalReturnValue).toEqual({ result: 'a-done' });
   });
 
   // VAL-07

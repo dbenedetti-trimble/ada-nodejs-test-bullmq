@@ -49,7 +49,7 @@ for i = 1, #allJobs, 2 do
     rcall("HSET", groupJobsKey, jobKey, "cancelled")
     cancelledCount = cancelledCount + 1
 
-  elseif jobStatus == "completed" then
+  elseif string.sub(jobStatus, 1, 9) == "completed" then
     completedCount = completedCount + 1
   end
 end

@@ -1119,7 +1119,10 @@ will never work with more accuracy than 1ms. */
     const group = job.opts.group;
 
     if (group.isCompensation) {
-      if (status === 'failed' && !job.finishedOn) {
+      // Skip updateGroupCompensation while the compensation job still has retry
+      // attempts remaining — only process when all retries are exhausted.
+      const maxAttempts = job.opts?.attempts ?? 1;
+      if (status === 'failed' && job.attemptsMade < maxAttempts) {
         return;
       }
       const client = await this.client;

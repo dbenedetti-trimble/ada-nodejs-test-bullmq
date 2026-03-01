@@ -1104,12 +1104,16 @@ export class Queue<
     if (!raw) {
       return [];
     }
-    return Object.entries(raw).map(([jobKey, status]) => {
+    return Object.entries(raw).map(([jobKey, rawStatus]) => {
       const lastColon = jobKey.lastIndexOf(':');
       const jobId = lastColon >= 0 ? jobKey.slice(lastColon + 1) : jobKey;
       const base = lastColon >= 0 ? jobKey.slice(0, lastColon) : jobKey;
       const secondColon = base.indexOf(':');
       const queueName = secondColon >= 0 ? base.slice(secondColon + 1) : base;
+      // Normalize: "completed:<returnValueJson>" → "completed"
+      const status = rawStatus.startsWith('completed:')
+        ? 'completed'
+        : rawStatus;
       return {
         jobId,
         jobKey,
@@ -1156,15 +1160,34 @@ export class Queue<
     const groupName = groupState.name;
 
     if (completedCount > 0) {
-      const groupJobsRaw = await this.getGroupJobs(groupId);
-      const completedJobs = groupJobsRaw.filter(j => j.status === 'completed');
+      // Read raw group jobs hash to extract stored return values for completed jobs.
+      // Return values are embedded as "completed:<returnValueJson>" (set at completion time).
+      const groupJobsKey = `${prefix}:${this.name}:groups:${groupId}:jobs`;
+      const rawJobsHash = (await client.hgetall(groupJobsKey)) || {};
+
+      const completedJobsRaw = Object.entries(rawJobsHash)
+        .filter(([, rawStatus]) => rawStatus.startsWith('completed:'))
+        .map(([jobKey, rawStatus]) => {
+          const lastColon = jobKey.lastIndexOf(':');
+          const jobId = lastColon >= 0 ? jobKey.slice(lastColon + 1) : jobKey;
+          const base = lastColon >= 0 ? jobKey.slice(0, lastColon) : jobKey;
+          const secondColon = base.indexOf(':');
+          const queueName =
+            secondColon >= 0 ? base.slice(secondColon + 1) : base;
+          return {
+            jobKey,
+            jobId,
+            queueName,
+            returnValue: rawStatus.slice(10) || 'null',
+          };
+        });
 
       const compensationJson = await client.hget(groupHashKey, 'compensation');
       const compensationMapping = JSON.parse(compensationJson || '{}');
 
       // Fetch each completed job's name from Redis to match against compensation mapping
       const completedJobsWithNames = await Promise.all(
-        completedJobs.map(async j => ({
+        completedJobsRaw.map(async j => ({
           ...j,
           jobName: (await client.hget(j.jobKey, 'name')) || '',
         })),
@@ -1176,31 +1199,44 @@ export class Queue<
         encodeUndefinedAsNil: true,
       });
 
-      const descriptors = completedJobsWithNames
-        .filter(j => compensationMapping[j.jobName] !== undefined)
-        .map(j => {
-          const compDef = compensationMapping[j.jobName];
-          return {
-            jobName: compDef.name,
-            groupId,
-            groupName,
-            ownerQueueName: this.name,
-            originalJobName: j.jobName,
-            originalJobId: j.jobId,
-            originalReturnValue: null as string | null,
-            compensationData: compDef?.data,
-            attempts: compDef?.opts?.attempts ?? 3,
-            backoff: compDef?.opts?.backoff,
-          };
-        });
+      // Group descriptors by compensation queue — per PRD, each job's compensation
+      // goes to its own queue's compensation queue (e.g., payments:compensation).
+      const descriptorsByQueue = new Map<string, object[]>();
+      for (const j of completedJobsWithNames) {
+        const compDef = compensationMapping[j.jobName];
+        if (compDef === undefined) {continue;}
+        const compQueueName = `${j.queueName}-compensation`;
+        const descriptor = {
+          jobName: compDef.name,
+          groupId,
+          groupName,
+          ownerQueueName: this.name,
+          originalJobName: j.jobName,
+          originalJobId: j.jobId,
+          originalReturnValue: j.returnValue,
+          compensationData: compDef?.data,
+          attempts: compDef?.opts?.attempts ?? 3,
+          backoff: compDef?.opts?.backoff,
+        };
+        if (!descriptorsByQueue.has(compQueueName)) {
+          descriptorsByQueue.set(compQueueName, []);
+        }
+        descriptorsByQueue.get(compQueueName)!.push(descriptor);
+      }
 
-      if (descriptors.length > 0) {
+      if (descriptorsByQueue.size > 0) {
+        const totalComps = Array.from(descriptorsByQueue.values()).reduce(
+          (s, a) => s + a.length,
+          0,
+        );
         await client.hset(
           groupHashKey,
           'state',
           'COMPENSATING',
           'updatedAt',
           timestamp,
+          'totalCompensations',
+          totalComps,
         );
         await client.xadd(
           `${prefix}:${this.name}:events`,
@@ -1216,13 +1252,16 @@ export class Queue<
           'reason',
           'group cancelled',
         );
-        const packed = packer.pack(descriptors);
-        await this.scripts.triggerCompensation(
-          client,
-          `${this.name}-compensation`,
-          packed,
-          groupHashKey,
-        );
+        for (const [compQueueName, descs] of descriptorsByQueue) {
+          const packed = packer.pack(descs);
+          // Pass empty groupHashKey — totalCompensations already set above
+          await this.scripts.triggerCompensation(
+            client,
+            compQueueName,
+            packed,
+            '',
+          );
+        }
       } else {
         await client.hset(
           groupHashKey,
