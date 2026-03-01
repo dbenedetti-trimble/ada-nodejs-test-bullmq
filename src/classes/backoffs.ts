@@ -38,23 +38,45 @@ export class Backoffs {
       };
     },
 
-    // TODO(features): implement linear strategy
-    // Formula: delay * attemptsMade, with optional jitter in [delay*(1-jitter), delay]
-    linear: function (_opts: BackoffOptions): BackoffStrategy {
-      throw new Error('linear backoff strategy: not yet implemented');
+    linear: function (opts: BackoffOptions): BackoffStrategy {
+      const { delay = 0, jitter = 0 } = opts;
+      return function (attemptsMade: number): number {
+        const rawDelay = delay * attemptsMade;
+        if (!jitter) return rawDelay;
+        const min = rawDelay * (1 - jitter);
+        return Math.floor(Math.random() * rawDelay * jitter + min);
+      };
     },
 
-    // TODO(features): implement polynomial strategy
-    // Formula: delay * (attemptsMade ^ exponent); exponent defaults to 2
-    polynomial: function (_opts: BackoffOptions): BackoffStrategy {
-      throw new Error('polynomial backoff strategy: not yet implemented');
+    polynomial: function (opts: BackoffOptions): BackoffStrategy {
+      const { delay = 0, jitter = 0, exponent = 2 } = opts;
+      if (exponent <= 0) throw new Error('exponent must be a positive number');
+      return function (attemptsMade: number): number {
+        const rawDelay = delay * Math.pow(attemptsMade, exponent);
+        if (!jitter) return rawDelay;
+        const min = rawDelay * (1 - jitter);
+        return Math.floor(Math.random() * rawDelay * jitter + min);
+      };
     },
 
-    // TODO(features): implement decorrelatedJitter strategy
-    // Formula: min(maxDelay, random(baseDelay, prevDelay * 3))
-    // Previous delay stored in job.data.__bullmq_prevDelay
-    decorrelatedJitter: function (_opts: BackoffOptions): BackoffStrategy {
-      throw new Error('decorrelatedJitter backoff strategy: not yet implemented');
+    decorrelatedJitter: function (opts: BackoffOptions): BackoffStrategy {
+      const { delay: baseDelay = 0 } = opts;
+      return function (
+        _attemptsMade: number,
+        _type?: string,
+        _err?: Error,
+        job?: MinimalJob,
+      ): number {
+        const prevDelay =
+          (job?.data?.__bullmq_prevDelay as number) ?? baseDelay;
+        const min = baseDelay;
+        const max = prevDelay * 3;
+        const computed = Math.floor(Math.random() * (max - min) + min);
+        if (job?.data) {
+          (job.data as Record<string, unknown>).__bullmq_prevDelay = computed;
+        }
+        return computed;
+      };
     },
   };
 
@@ -82,9 +104,12 @@ export class Backoffs {
       const strategy = lookupStrategy(backoff, customStrategy);
       const result = strategy(attemptsMade, backoff.type, err, job);
 
-      // TODO(features): apply maxDelay clamping after strategy result
-      // Handle both Promise<number> and number return types
-      // if (backoff.maxDelay && backoff.maxDelay > 0) { ... }
+      if (backoff.maxDelay && backoff.maxDelay > 0) {
+        if (result instanceof Promise) {
+          return result.then(d => Math.min(d, backoff.maxDelay!));
+        }
+        return Math.min(result as number, backoff.maxDelay);
+      }
 
       return result;
     }

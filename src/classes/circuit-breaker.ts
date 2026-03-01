@@ -37,8 +37,18 @@ export class CircuitBreaker {
    * HALF_OPEN → true only while fewer than halfOpenMaxAttempts jobs have been dispatched
    */
   shouldAllowJob(): boolean {
-    // TODO(features): implement HALF_OPEN slot tracking
-    throw new Error('Not implemented');
+    switch (this.state) {
+      case CircuitBreakerState.CLOSED:
+        return true;
+      case CircuitBreakerState.OPEN:
+        return false;
+      case CircuitBreakerState.HALF_OPEN:
+        if (this.halfOpenAttempts < this.halfOpenMaxAttempts) {
+          this.halfOpenAttempts++;
+          return true;
+        }
+        return false;
+    }
   }
 
   /**
@@ -49,8 +59,18 @@ export class CircuitBreaker {
    * @returns the new state after recording
    */
   recordSuccess(_jobId: string): CircuitBreakerState {
-    // TODO(features): implement success recording and HALF_OPEN → CLOSED transition
-    throw new Error('Not implemented');
+    if (this.state === CircuitBreakerState.CLOSED) {
+      this.failureCount = 0;
+    } else if (this.state === CircuitBreakerState.HALF_OPEN) {
+      if (this.halfOpenAttempts >= this.halfOpenMaxAttempts) {
+        this.state = CircuitBreakerState.CLOSED;
+        this.failureCount = 0;
+        this.halfOpenAttempts = 0;
+        clearTimeout(this.durationTimer);
+        this.durationTimer = undefined;
+      }
+    }
+    return this.state;
   }
 
   /**
@@ -61,8 +81,16 @@ export class CircuitBreaker {
    * @returns the new state after recording
    */
   recordFailure(_jobId?: string): CircuitBreakerState {
-    // TODO(features): implement failure recording and CLOSED → OPEN transition
-    throw new Error('Not implemented');
+    if (this.state === CircuitBreakerState.CLOSED) {
+      this.failureCount++;
+      if (this.failureCount >= this.opts.threshold) {
+        this.state = CircuitBreakerState.OPEN;
+      }
+    } else if (this.state === CircuitBreakerState.HALF_OPEN) {
+      this.halfOpenAttempts = 0;
+      this.state = CircuitBreakerState.OPEN;
+    }
+    return this.state;
   }
 
   /**
@@ -70,8 +98,10 @@ export class CircuitBreaker {
    * Calls `onExpiry` when the timer fires.
    */
   startDurationTimer(onExpiry: () => void): void {
-    // TODO(features): implement duration timer with clearTimeout guard
-    throw new Error('Not implemented');
+    clearTimeout(this.durationTimer);
+    if (!this.closed) {
+      this.durationTimer = setTimeout(onExpiry, this.opts.duration);
+    }
   }
 
   /**
@@ -79,8 +109,8 @@ export class CircuitBreaker {
    * Called by the Worker after the duration timer fires.
    */
   transitionToHalfOpen(): void {
-    // TODO(features): implement OPEN → HALF_OPEN transition
-    throw new Error('Not implemented');
+    this.state = CircuitBreakerState.HALF_OPEN;
+    this.halfOpenAttempts = 0;
   }
 
   /**
@@ -88,7 +118,8 @@ export class CircuitBreaker {
    * Called by Worker.close() to allow clean shutdown.
    */
   close(): void {
-    // TODO(features): implement cleanup — clear timer, set closed flag
-    throw new Error('Not implemented');
+    this.closed = true;
+    clearTimeout(this.durationTimer);
+    this.durationTimer = undefined;
   }
 }

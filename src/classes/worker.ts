@@ -291,21 +291,33 @@ export class Worker<
       throw new Error('drainDelay must be greater than 0');
     }
 
-    // TODO(features): validate circuitBreaker options and instantiate CircuitBreaker
-    // if (this.opts.circuitBreaker) {
-    //   const cb = this.opts.circuitBreaker;
-    //   if (typeof cb.threshold !== 'number' || cb.threshold <= 0 || !Number.isInteger(cb.threshold)) {
-    //     throw new Error('circuitBreaker.threshold must be a positive integer');
-    //   }
-    //   if (typeof cb.duration !== 'number' || cb.duration <= 0 || !Number.isInteger(cb.duration)) {
-    //     throw new Error('circuitBreaker.duration must be a positive integer');
-    //   }
-    //   if (cb.halfOpenMaxAttempts !== undefined &&
-    //       (typeof cb.halfOpenMaxAttempts !== 'number' || cb.halfOpenMaxAttempts <= 0)) {
-    //     throw new Error('circuitBreaker.halfOpenMaxAttempts must be a positive integer');
-    //   }
-    //   this.circuitBreaker = new CircuitBreaker(cb);
-    // }
+    if (this.opts.circuitBreaker) {
+      const cb = this.opts.circuitBreaker;
+      if (
+        typeof cb.threshold !== 'number' ||
+        cb.threshold <= 0 ||
+        !Number.isInteger(cb.threshold)
+      ) {
+        throw new Error('circuitBreaker.threshold must be a positive integer');
+      }
+      if (
+        typeof cb.duration !== 'number' ||
+        cb.duration <= 0 ||
+        !Number.isInteger(cb.duration)
+      ) {
+        throw new Error('circuitBreaker.duration must be a positive integer');
+      }
+      if (
+        cb.halfOpenMaxAttempts !== undefined &&
+        (typeof cb.halfOpenMaxAttempts !== 'number' ||
+          cb.halfOpenMaxAttempts <= 0)
+      ) {
+        throw new Error(
+          'circuitBreaker.halfOpenMaxAttempts must be a positive integer',
+        );
+      }
+      this.circuitBreaker = new CircuitBreaker(cb);
+    }
 
     this.concurrency = this.opts.concurrency;
 
@@ -622,12 +634,17 @@ export class Worker<
    * Waits while the circuit breaker is OPEN, using an interruptible delay
    * (same abortDelayController as the rate limiter) so that close() and
    * the HALF_OPEN timer transition can both wake this up.
-   *
-   * TODO(features): implement — use this.abortDelayController pattern from waitForRateLimit()
    */
   private async waitForCircuitBreaker(): Promise<void> {
-    // TODO(features): implement circuit breaker wait
-    // Analogous to waitForRateLimit() but triggered when circuitBreaker.shouldAllowJob() === false
+    if (this.circuitBreaker?.shouldAllowJob() === false) {
+      this.abortDelayController?.abort();
+      this.abortDelayController = new AbortController();
+
+      await this.delay(
+        this.opts.circuitBreaker!.duration,
+        this.abortDelayController,
+      );
+    }
   }
 
   /**
@@ -655,8 +672,7 @@ export class Worker<
         !this.waiting &&
         asyncFifoQueue.numTotal() < this._concurrency &&
         !this.isRateLimited() &&
-        // TODO(features): add circuit breaker guard: this.circuitBreaker?.shouldAllowJob() !== false
-        true
+        this.circuitBreaker?.shouldAllowJob() !== false
       ) {
         const token = `${this.id}:${tokenPostfix++}`;
 
@@ -709,6 +725,7 @@ export class Worker<
         );
       } else if (asyncFifoQueue.numQueued() === 0) {
         await this.waitForRateLimit();
+        await this.waitForCircuitBreaker();
       }
     }
   }
@@ -1136,15 +1153,17 @@ will never work with more accuracy than 1ms. */
       );
       this.emit('completed', job, result, 'active');
 
-      // TODO(features): circuit breaker recordSuccess — after emit('completed'):
-      // if (this.circuitBreaker) {
-      //   const prev = this.circuitBreaker.getState();
-      //   this.circuitBreaker.recordSuccess(job.id!);
-      //   const next = this.circuitBreaker.getState();
-      //   if (prev === CircuitBreakerState.HALF_OPEN && next === CircuitBreakerState.CLOSED) {
-      //     this.emit('circuit:closed', { testJobId: job.id! });
-      //   }
-      // }
+      if (this.circuitBreaker) {
+        const prev = this.circuitBreaker.getState();
+        this.circuitBreaker.recordSuccess(job.id!);
+        const next = this.circuitBreaker.getState();
+        if (
+          prev === CircuitBreakerState.HALF_OPEN &&
+          next === CircuitBreakerState.CLOSED
+        ) {
+          this.emit('circuit:closed', { testJobId: job.id! });
+        }
+      }
 
       span?.addEvent('job completed', {
         [TelemetryAttributes.JobResult]: JSON.stringify(result),
@@ -1198,29 +1217,38 @@ will never work with more accuracy than 1ms. */
 
       this.emit('failed', job, err, 'active');
 
-      // TODO(features): circuit breaker recordFailure — after emit('failed'):
-      // if (this.circuitBreaker) {
-      //   const prev = this.circuitBreaker.getState();
-      //   this.circuitBreaker.recordFailure(job?.id);
-      //   const next = this.circuitBreaker.getState();
-      //   if (prev === CircuitBreakerState.CLOSED && next === CircuitBreakerState.OPEN) {
-      //     this.emit('circuit:open', {
-      //       failures: this.opts.circuitBreaker!.threshold,
-      //       threshold: this.opts.circuitBreaker!.threshold,
-      //     });
-      //     this.circuitBreaker.startDurationTimer(() => {
-      //       this.circuitBreaker!.transitionToHalfOpen();
-      //       this.emit('circuit:half-open', { duration: this.opts.circuitBreaker!.duration });
-      //       this.abortDelayController?.abort();
-      //     });
-      //   } else if (prev === CircuitBreakerState.HALF_OPEN && next === CircuitBreakerState.OPEN) {
-      //     this.circuitBreaker.startDurationTimer(() => {
-      //       this.circuitBreaker!.transitionToHalfOpen();
-      //       this.emit('circuit:half-open', { duration: this.opts.circuitBreaker!.duration });
-      //       this.abortDelayController?.abort();
-      //     });
-      //   }
-      // }
+      if (this.circuitBreaker) {
+        const prev = this.circuitBreaker.getState();
+        this.circuitBreaker.recordFailure(job?.id);
+        const next = this.circuitBreaker.getState();
+        if (
+          prev === CircuitBreakerState.CLOSED &&
+          next === CircuitBreakerState.OPEN
+        ) {
+          this.emit('circuit:open', {
+            failures: this.opts.circuitBreaker!.threshold,
+            threshold: this.opts.circuitBreaker!.threshold,
+          });
+          this.circuitBreaker.startDurationTimer(() => {
+            this.circuitBreaker!.transitionToHalfOpen();
+            this.emit('circuit:half-open', {
+              duration: this.opts.circuitBreaker!.duration,
+            });
+            this.abortDelayController?.abort();
+          });
+        } else if (
+          prev === CircuitBreakerState.HALF_OPEN &&
+          next === CircuitBreakerState.OPEN
+        ) {
+          this.circuitBreaker.startDurationTimer(() => {
+            this.circuitBreaker!.transitionToHalfOpen();
+            this.emit('circuit:half-open', {
+              duration: this.opts.circuitBreaker!.duration,
+            });
+            this.abortDelayController?.abort();
+          });
+        }
+      }
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,
@@ -1351,8 +1379,7 @@ will never work with more accuracy than 1ms. */
           });
           this.emit('closing', 'closing queue');
           this.abortDelayController?.abort();
-          // TODO(features): clear circuit breaker timer on close
-          // this.circuitBreaker?.close();
+          this.circuitBreaker?.close();
 
           // Define the async cleanup functions
           const asyncCleanups = [
