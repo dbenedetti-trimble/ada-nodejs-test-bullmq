@@ -143,7 +143,9 @@ describe('Circuit breaker', () => {
       await delay(200);
       expect(cb.getState()).toBe(CircuitBreakerState.HALF_OPEN);
       expect(cb.shouldAllowJob()).toBe(true);
+      cb.consumeHalfOpenAttempt();
       expect(cb.shouldAllowJob()).toBe(true);
+      cb.consumeHalfOpenAttempt();
       expect(cb.shouldAllowJob()).toBe(false);
       cb.close();
     });
