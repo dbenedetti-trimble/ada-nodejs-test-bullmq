@@ -22,16 +22,28 @@ export class CircuitBreaker {
     private readonly onTransition: (
       payload: CircuitBreakerTransitionPayload,
     ) => void,
-  ) {}
+  ) {
+    this.halfOpenAttemptsLeft = opts.halfOpenMaxAttempts;
+  }
 
   /**
    * Notify the circuit breaker that a job completed successfully.
    * In CLOSED state this resets the failure counter.
    * In HALF_OPEN state this closes the circuit.
    */
-  recordSuccess(_jobId: string): void {
-    // TODO (features pass): implement CLOSED counter reset and HALF_OPEN → CLOSED transition
-    throw new Error('Not implemented');
+  recordSuccess(jobId: string): void {
+    if (this.state === CircuitBreakerState.HALF_OPEN) {
+      this.clearDurationTimer();
+      this.state = CircuitBreakerState.CLOSED;
+      this.failureCount = 0;
+      this.halfOpenAttemptsLeft = this.opts.halfOpenMaxAttempts;
+      this.onTransition({
+        state: CircuitBreakerState.CLOSED,
+        testJobId: jobId,
+      });
+    } else if (this.state === CircuitBreakerState.CLOSED) {
+      this.failureCount = 0;
+    }
   }
 
   /**
@@ -41,8 +53,27 @@ export class CircuitBreaker {
    * Stalled jobs must NOT call this method.
    */
   recordFailure(): void {
-    // TODO (features pass): implement CLOSED threshold check and HALF_OPEN → OPEN transition
-    throw new Error('Not implemented');
+    if (this.state === CircuitBreakerState.CLOSED) {
+      this.failureCount++;
+      if (this.failureCount >= this.opts.threshold) {
+        this.state = CircuitBreakerState.OPEN;
+        this.startDurationTimer();
+        this.onTransition({
+          state: CircuitBreakerState.OPEN,
+          failures: this.failureCount,
+          threshold: this.opts.threshold,
+        });
+      }
+    } else if (this.state === CircuitBreakerState.HALF_OPEN) {
+      this.state = CircuitBreakerState.OPEN;
+      this.halfOpenAttemptsLeft = this.opts.halfOpenMaxAttempts;
+      this.startDurationTimer();
+      this.onTransition({
+        state: CircuitBreakerState.OPEN,
+        failures: this.failureCount,
+        threshold: this.opts.threshold,
+      });
+    }
   }
 
   /**
@@ -57,8 +88,18 @@ export class CircuitBreaker {
    * CLOSED → true, OPEN → false, HALF_OPEN → true up to halfOpenMaxAttempts times.
    */
   shouldAllowJob(): boolean {
-    // TODO (features pass): implement per-state logic
-    throw new Error('Not implemented');
+    if (this.state === CircuitBreakerState.CLOSED) {
+      return true;
+    }
+    if (this.state === CircuitBreakerState.OPEN) {
+      return false;
+    }
+    // HALF_OPEN: allow up to halfOpenMaxAttempts jobs
+    if (this.halfOpenAttemptsLeft > 0) {
+      this.halfOpenAttemptsLeft--;
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -66,6 +107,23 @@ export class CircuitBreaker {
    * clean shutdown without waiting for the OPEN duration to expire.
    */
   close(): void {
+    this.clearDurationTimer();
+  }
+
+  private startDurationTimer(): void {
+    this.clearDurationTimer();
+    this.durationTimer = setTimeout(() => {
+      this.durationTimer = undefined;
+      this.state = CircuitBreakerState.HALF_OPEN;
+      this.halfOpenAttemptsLeft = this.opts.halfOpenMaxAttempts;
+      this.onTransition({
+        state: CircuitBreakerState.HALF_OPEN,
+        duration: this.opts.duration,
+      });
+    }, this.opts.duration);
+  }
+
+  private clearDurationTimer(): void {
     if (this.durationTimer !== undefined) {
       clearTimeout(this.durationTimer);
       this.durationTimer = undefined;

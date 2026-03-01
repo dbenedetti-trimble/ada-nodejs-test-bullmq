@@ -41,6 +41,8 @@ import {
   UnrecoverableError,
 } from './errors';
 import { SpanKind, TelemetryAttributes } from '../enums';
+import { CircuitBreaker } from './circuit-breaker';
+import { CircuitBreakerState } from '../enums/circuit-breaker-state';
 import { JobScheduler } from './job-scheduler';
 import { LockManager } from './lock-manager';
 
@@ -217,7 +219,7 @@ export class Worker<
   private blockUntil = 0;
   private _concurrency: number;
   private childPool: ChildPool;
-  private circuitBreaker?: import('./circuit-breaker').CircuitBreaker;
+  private circuitBreaker?: CircuitBreaker;
   private drained = false;
   private limitUntil = 0;
   protected lockManager: LockManager;
@@ -288,6 +290,44 @@ export class Worker<
 
     if (typeof this.opts.drainDelay !== 'number' || this.opts.drainDelay <= 0) {
       throw new Error('drainDelay must be greater than 0');
+    }
+
+    if (this.opts.circuitBreaker) {
+      const cb = this.opts.circuitBreaker;
+      if (
+        typeof cb.threshold !== 'number' ||
+        !Number.isInteger(cb.threshold) ||
+        cb.threshold <= 0
+      ) {
+        throw new Error(
+          'circuitBreaker.threshold must be a positive integer',
+        );
+      }
+      if (
+        typeof cb.duration !== 'number' ||
+        !Number.isInteger(cb.duration) ||
+        cb.duration <= 0
+      ) {
+        throw new Error(
+          'circuitBreaker.duration must be a positive integer',
+        );
+      }
+      const halfOpenMaxAttempts = cb.halfOpenMaxAttempts ?? 1;
+      this.circuitBreaker = new CircuitBreaker(
+        { threshold: cb.threshold, duration: cb.duration, halfOpenMaxAttempts },
+        payload => {
+          if (payload.state === CircuitBreakerState.OPEN) {
+            this.emit('circuit:open', {
+              failures: payload.failures,
+              threshold: payload.threshold,
+            });
+          } else if (payload.state === CircuitBreakerState.HALF_OPEN) {
+            this.emit('circuit:half-open', { duration: payload.duration });
+          } else if (payload.state === CircuitBreakerState.CLOSED) {
+            this.emit('circuit:closed', { testJobId: payload.testJobId });
+          }
+        },
+      );
     }
 
     this.concurrency = this.opts.concurrency;
@@ -627,6 +667,10 @@ export class Worker<
         asyncFifoQueue.numTotal() < this._concurrency &&
         !this.isRateLimited()
       ) {
+        if (this.circuitBreaker && !this.circuitBreaker.shouldAllowJob()) {
+          break;
+        }
+
         const token = `${this.id}:${tokenPostfix++}`;
 
         const fetchedJob = this.retryIfFailed<void | Job<
@@ -677,7 +721,14 @@ export class Worker<
           ),
         );
       } else if (asyncFifoQueue.numQueued() === 0) {
-        await this.waitForRateLimit();
+        if (
+          this.circuitBreaker &&
+          this.circuitBreaker.getState() === CircuitBreakerState.OPEN
+        ) {
+          await this.delay(this.opts.drainDelay * 1000);
+        } else {
+          await this.waitForRateLimit();
+        }
       }
     }
   }
@@ -1104,6 +1155,7 @@ will never work with more accuracy than 1ms. */
         fetchNextCallback() && !(this.closing || this.paused),
       );
       this.emit('completed', job, result, 'active');
+      this.circuitBreaker?.recordSuccess(job.id);
 
       span?.addEvent('job completed', {
         [TelemetryAttributes.JobResult]: JSON.stringify(result),
@@ -1156,6 +1208,7 @@ will never work with more accuracy than 1ms. */
       );
 
       this.emit('failed', job, err, 'active');
+      this.circuitBreaker?.recordFailure();
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,
@@ -1273,6 +1326,7 @@ will never work with more accuracy than 1ms. */
           });
           this.emit('closing', 'closing queue');
           this.abortDelayController?.abort();
+          this.circuitBreaker?.close();
 
           // Define the async cleanup functions
           const asyncCleanups = [
@@ -1310,8 +1364,9 @@ will never work with more accuracy than 1ms. */
    * circuit breaker is configured on this worker.
    */
   getCircuitBreakerState(): 'closed' | 'open' | 'half-open' | undefined {
-    // TODO (features pass): delegate to this.circuitBreaker?.getState()
-    return this.circuitBreaker ? (this.circuitBreaker.getState() as 'closed' | 'open' | 'half-open') : undefined;
+    return this.circuitBreaker
+      ? (this.circuitBreaker.getState() as 'closed' | 'open' | 'half-open')
+      : undefined;
   }
 
   /**
