@@ -21,10 +21,10 @@ import {
   KeepJobs,
   RedisJobOptions,
   JobProgress,
-  JobJsonRaw,
 } from '../../types';
+import { JobJsonRaw } from '../../interfaces';
 import { version as packageVersion } from '../../version';
-import { ScriptContext, isJobInList } from './script-utils';
+import { ScriptContext, isJobInList, finishedErrors } from './script-utils';
 import { JobScripts } from './job-scripts';
 import { QueueScripts } from './queue-scripts';
 import { FlowScripts } from './flow-scripts';
@@ -88,6 +88,10 @@ export class Scripts {
 
   async isJobInList(listKey: string, jobId: string): Promise<boolean> {
     return isJobInList(this.ctx, listKey, jobId);
+  }
+
+  get moveToFinishedKeys(): (string | undefined)[] {
+    return (this.workerScripts as any).moveToFinishedKeys;
   }
 
   // --- JobScripts delegation ---
@@ -579,7 +583,7 @@ export class Scripts {
     );
   }
 
-  protected moveToCompletedArgs<T = any, R = any, N extends string = string>(
+  moveToCompletedArgs<T = any, R = any, N extends string = string>(
     job: MinimalJob<T, R, N>,
     returnvalue: R,
     removeOnComplete: boolean | number | KeepJobs,
@@ -595,7 +599,7 @@ export class Scripts {
     );
   }
 
-  protected moveToFailedArgs<T = any, R = any, N extends string = string>(
+  moveToFailedArgs<T = any, R = any, N extends string = string>(
     job: MinimalJob<T, R, N>,
     failedReason: string,
     removeOnFailed: boolean | number | KeepJobs,
@@ -690,6 +694,6 @@ export class Scripts {
     command: string;
     state?: string;
   }): Error {
-    throw new Error('stub: not yet implemented');
+    return finishedErrors({ code, jobId, parentKey, command, state });
   }
 }
