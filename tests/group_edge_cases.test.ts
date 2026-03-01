@@ -41,7 +41,10 @@ describe('JobGroup - Edge Cases (GRP-8)', () => {
     await queueEvents.close();
     await queue.close();
     await removeAllQueueData(new IORedis(redisHost), queueName);
-    await removeAllQueueData(new IORedis(redisHost), `${queueName}:compensation`);
+    await removeAllQueueData(
+      new IORedis(redisHost),
+      `${queueName}-compensation`,
+    );
   });
 
   afterAll(async () => {
@@ -92,13 +95,18 @@ describe('JobGroup - Edge Cases (GRP-8)', () => {
     expect(jobs.some(j => j.status === 'cancelled')).toBe(true);
   });
 
-  // VAL-17
+  // VAL-17: job-b has a long delay so it remains unprocessed when job-a fails and compensation fires
   it('should cancel prioritized group jobs from the prioritized sorted set during compensation', async () => {
     const groupNode = await flowProducer.addGroup({
       name: 'prioritized-cancel-group',
       jobs: [
         { name: 'job-a', queueName, data: {} },
-        { name: 'job-b', queueName, data: {}, opts: { priority: 1 } },
+        {
+          name: 'job-b',
+          queueName,
+          data: {},
+          opts: { priority: 1, delay: 60000 },
+        },
       ],
     });
 
@@ -145,7 +153,10 @@ describe('JobGroup - Edge Cases (GRP-8)', () => {
         failCount++;
         throw new Error('concurrent fail');
       },
-      { connection: new IORedis(redisHost, { maxRetriesPerRequest: null }), prefix },
+      {
+        connection: new IORedis(redisHost, { maxRetriesPerRequest: null }),
+        prefix,
+      },
     );
     worker = new Worker(
       queueName,
@@ -153,7 +164,10 @@ describe('JobGroup - Edge Cases (GRP-8)', () => {
         failCount++;
         throw new Error('concurrent fail');
       },
-      { connection: new IORedis(redisHost, { maxRetriesPerRequest: null }), prefix },
+      {
+        connection: new IORedis(redisHost, { maxRetriesPerRequest: null }),
+        prefix,
+      },
     );
 
     await new Promise<void>((resolve, reject) => {
@@ -193,16 +207,14 @@ describe('JobGroup - Edge Cases (GRP-8)', () => {
       ],
     });
 
-    const worker2 = new Worker(
-      queueName,
-      async () => ({ done: true }),
-      { connection: new IORedis(redisHost, { maxRetriesPerRequest: null }), prefix },
-    );
-    worker = new Worker(
-      queueName,
-      async () => ({ done: true }),
-      { connection: new IORedis(redisHost, { maxRetriesPerRequest: null }), prefix },
-    );
+    const worker2 = new Worker(queueName, async () => ({ done: true }), {
+      connection: new IORedis(redisHost, { maxRetriesPerRequest: null }),
+      prefix,
+    });
+    worker = new Worker(queueName, async () => ({ done: true }), {
+      connection: new IORedis(redisHost, { maxRetriesPerRequest: null }),
+      prefix,
+    });
 
     await new Promise<void>((resolve, reject) => {
       let completed = 0;

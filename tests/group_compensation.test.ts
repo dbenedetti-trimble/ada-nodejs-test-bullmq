@@ -43,7 +43,7 @@ describe('JobGroup - Compensation Flow (GRP-4, GRP-5)', () => {
     await removeAllQueueData(new IORedis(redisHost), queueName);
     await removeAllQueueData(
       new IORedis(redisHost),
-      `${queueName}:compensation`,
+      `${queueName}-compensation`,
     );
   });
 
@@ -91,7 +91,7 @@ describe('JobGroup - Compensation Flow (GRP-4, GRP-5)', () => {
     expect(['COMPENSATING', 'FAILED'].includes(state!.state)).toBe(true);
 
     // Compensation queue should have jobs
-    const compWaitKey = `${prefix}:${queueName}:compensation:wait`;
+    const compWaitKey = `${prefix}:${queueName}-compensation:wait`;
     const compJobs = await connection.lrange(compWaitKey, 0, -1);
     expect(compJobs.length).toBeGreaterThanOrEqual(1);
   });
@@ -170,12 +170,12 @@ describe('JobGroup - Compensation Flow (GRP-4, GRP-5)', () => {
     });
     await new Promise(r => setTimeout(r, 500));
 
-    const compQueue = new Queue(`${queueName}:compensation`, {
+    const compQueue = new Queue(`${queueName}-compensation`, {
       connection,
       prefix,
     });
     const compWorker = new Worker(
-      `${queueName}:compensation`,
+      `${queueName}-compensation`,
       async () => {
         return { compensated: true };
       },
@@ -183,7 +183,10 @@ describe('JobGroup - Compensation Flow (GRP-4, GRP-5)', () => {
     );
 
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('timeout waiting for compensation')), 15000);
+      const timeout = setTimeout(
+        () => reject(new Error('timeout waiting for compensation')),
+        15000,
+      );
       compWorker.on('completed', () => {
         clearTimeout(timeout);
         resolve();
@@ -193,7 +196,10 @@ describe('JobGroup - Compensation Flow (GRP-4, GRP-5)', () => {
     await new Promise(r => setTimeout(r, 1000));
     await compWorker.close();
     await compQueue.close();
-    await removeAllQueueData(new IORedis(redisHost), `${queueName}:compensation`);
+    await removeAllQueueData(
+      new IORedis(redisHost),
+      `${queueName}-compensation`,
+    );
 
     const state = await queue.getGroupState(groupNode.groupId);
     expect(['FAILED', 'COMPENSATING'].includes(state!.state)).toBe(true);
@@ -232,12 +238,12 @@ describe('JobGroup - Compensation Flow (GRP-4, GRP-5)', () => {
     });
     await new Promise(r => setTimeout(r, 500));
 
-    const compQueue = new Queue(`${queueName}:compensation`, {
+    const compQueue = new Queue(`${queueName}-compensation`, {
       connection,
       prefix,
     });
     const compWorker = new Worker(
-      `${queueName}:compensation`,
+      `${queueName}-compensation`,
       async () => {
         throw new Error('compensation failed');
       },
@@ -255,10 +261,15 @@ describe('JobGroup - Compensation Flow (GRP-4, GRP-5)', () => {
     await new Promise(r => setTimeout(r, 1000));
     await compWorker.close();
     await compQueue.close();
-    await removeAllQueueData(new IORedis(redisHost), `${queueName}:compensation`);
+    await removeAllQueueData(
+      new IORedis(redisHost),
+      `${queueName}-compensation`,
+    );
 
     const state = await queue.getGroupState(groupNode.groupId);
-    expect(['FAILED_COMPENSATION', 'COMPENSATING', 'FAILED'].includes(state!.state)).toBe(true);
+    expect(
+      ['FAILED_COMPENSATION', 'COMPENSATING', 'FAILED'].includes(state!.state),
+    ).toBe(true);
   });
 
   // VAL-19
@@ -295,10 +306,10 @@ describe('JobGroup - Compensation Flow (GRP-4, GRP-5)', () => {
 
     await new Promise(r => setTimeout(r, 1000));
 
-    const compWaitKey = `${prefix}:${queueName}:compensation:wait`;
+    const compWaitKey = `${prefix}:${queueName}-compensation:wait`;
     const compJobIds = await connection.lrange(compWaitKey, 0, -1);
     if (compJobIds.length > 0) {
-      const compJobHashKey = `${prefix}:${queueName}:compensation:${compJobIds[0]}`;
+      const compJobHashKey = `${prefix}:${queueName}-compensation:${compJobIds[0]}`;
       const rawData = await connection.hget(compJobHashKey, 'data');
       if (rawData) {
         const data = JSON.parse(rawData);

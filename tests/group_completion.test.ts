@@ -100,23 +100,18 @@ describe('JobGroup - Successful Completion (GRP-3)', () => {
 
     const completedEvents: string[] = [];
 
-    const worker2 = new Worker(
-      queueName,
-      async () => ({ result: 'ok' }),
-      { connection: new IORedis(redisHost, { maxRetriesPerRequest: null }), prefix },
-    );
-    worker = new Worker(
-      queueName,
-      async () => ({ result: 'ok' }),
-      { connection: new IORedis(redisHost, { maxRetriesPerRequest: null }), prefix },
-    );
+    const worker2 = new Worker(queueName, async () => ({ result: 'ok' }), {
+      connection: new IORedis(redisHost, { maxRetriesPerRequest: null }),
+      prefix,
+    });
+    worker = new Worker(queueName, async () => ({ result: 'ok' }), {
+      connection: new IORedis(redisHost, { maxRetriesPerRequest: null }),
+      prefix,
+    });
 
     await new Promise<void>((resolve, reject) => {
       let completed = 0;
-      const timeout = setTimeout(
-        () => reject(new Error('timeout')),
-        10000,
-      );
+      const timeout = setTimeout(() => reject(new Error('timeout')), 10000);
       const onCompleted = () => {
         completed++;
         if (completed >= 2) {
@@ -155,9 +150,13 @@ describe('JobGroup - Successful Completion (GRP-3)', () => {
     });
 
     let processed = 0;
-    worker = new Worker(queueName, async () => {
-      processed++;
-    }, { connection, prefix });
+    worker = new Worker(
+      queueName,
+      async () => {
+        processed++;
+      },
+      { connection, prefix },
+    );
 
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('timeout')), 15000);

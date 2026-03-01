@@ -86,7 +86,12 @@ elseif status == "failed" then
       end
     end
 
-    local completedJobsJson = cjson.encode(completedJobs)
+    local completedJobsJson
+    if #completedJobs == 0 then
+      completedJobsJson = "[]"
+    else
+      completedJobsJson = cjson.encode(completedJobs)
+    end
     local failedJobId = string.match(jobKey, ":([^:]+)$") or jobKey
 
     rcall("XADD", eventsKey, "*",

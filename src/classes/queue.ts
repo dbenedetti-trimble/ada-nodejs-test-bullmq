@@ -39,8 +39,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -1108,8 +1109,7 @@ export class Queue<
       const jobId = lastColon >= 0 ? jobKey.slice(lastColon + 1) : jobKey;
       const base = lastColon >= 0 ? jobKey.slice(0, lastColon) : jobKey;
       const secondColon = base.indexOf(':');
-      const queueName =
-        secondColon >= 0 ? base.slice(secondColon + 1) : base;
+      const queueName = secondColon >= 0 ? base.slice(secondColon + 1) : base;
       return {
         jobId,
         jobKey,
@@ -1134,7 +1134,11 @@ export class Queue<
       throw new GroupNotFoundError(groupId);
     }
     if (groupState.state !== 'ACTIVE') {
-      throw new InvalidGroupStateError(groupId, groupState.state, 'cancelGroup');
+      throw new InvalidGroupStateError(
+        groupId,
+        groupState.state,
+        'cancelGroup',
+      );
     }
 
     const client = await this.client;
@@ -1148,39 +1152,40 @@ export class Queue<
       timestamp,
     );
 
+    const groupHashKey = `${prefix}:${this.name}:groups:${groupId}`;
+    const groupName = groupState.name;
+
     if (completedCount > 0) {
       const groupJobsRaw = await this.getGroupJobs(groupId);
       const completedJobs = groupJobsRaw.filter(j => j.status === 'completed');
 
-      const groupHashKey = `${prefix}:${this.name}:groups:${groupId}`;
       const compensationJson = await client.hget(groupHashKey, 'compensation');
       const compensationMapping = JSON.parse(compensationJson || '{}');
-      const groupName = groupState.name;
+
+      // Fetch each completed job's name from Redis to match against compensation mapping
+      const completedJobsWithNames = await Promise.all(
+        completedJobs.map(async j => ({
+          ...j,
+          jobName: (await client.hget(j.jobKey, 'name')) || '',
+        })),
+      );
 
       const { Packr } = await import('msgpackr');
-      const packer = new Packr({ useRecords: false, encodeUndefinedAsNil: true });
+      const packer = new Packr({
+        useRecords: false,
+        encodeUndefinedAsNil: true,
+      });
 
-      const descriptors = completedJobs
-        .filter(j => {
-          const lastColon = j.jobKey.lastIndexOf(':');
-          const base = j.jobKey.slice(0, lastColon);
-          const secondColon = base.indexOf(':');
-          const jQueueName = secondColon >= 0 ? base.slice(secondColon + 1) : base;
-          return compensationMapping[jQueueName] !== undefined ||
-            compensationMapping[j.jobId] !== undefined;
-        })
+      const descriptors = completedJobsWithNames
+        .filter(j => compensationMapping[j.jobName] !== undefined)
         .map(j => {
-          const lastColon = j.jobKey.lastIndexOf(':');
-          const base = j.jobKey.slice(0, lastColon);
-          const secondColon = base.indexOf(':');
-          const jQueueName = secondColon >= 0 ? base.slice(secondColon + 1) : base;
-          const compDef = compensationMapping[jQueueName] || compensationMapping[j.jobId];
+          const compDef = compensationMapping[j.jobName];
           return {
-            jobName: compDef?.name || `compensate-${j.jobId}`,
+            jobName: compDef.name,
             groupId,
             groupName,
             ownerQueueName: this.name,
-            originalJobName: j.queueName,
+            originalJobName: j.jobName,
             originalJobId: j.jobId,
             originalReturnValue: null as string | null,
             compensationData: compDef?.data,
@@ -1190,41 +1195,74 @@ export class Queue<
         });
 
       if (descriptors.length > 0) {
-        const packed = packer.pack(descriptors);
-        await this.scripts.triggerCompensation(
-          client,
-          `${this.name}:compensation`,
-          packed,
+        await client.hset(
           groupHashKey,
-        );
-      } else {
-        await client.hset(groupHashKey,
-          'state', 'FAILED',
-          'updatedAt', timestamp,
+          'state',
+          'COMPENSATING',
+          'updatedAt',
+          timestamp,
         );
         await client.xadd(
           `${prefix}:${this.name}:events`,
           '*',
-          'event', 'group:failed',
-          'groupId', groupId,
-          'groupName', groupName,
-          'state', 'FAILED',
+          'event',
+          'group:compensating',
+          'groupId',
+          groupId,
+          'groupName',
+          groupName,
+          'failedJobId',
+          '',
+          'reason',
+          'group cancelled',
+        );
+        const packed = packer.pack(descriptors);
+        await this.scripts.triggerCompensation(
+          client,
+          `${this.name}-compensation`,
+          packed,
+          groupHashKey,
+        );
+      } else {
+        await client.hset(
+          groupHashKey,
+          'state',
+          'FAILED',
+          'updatedAt',
+          timestamp,
+        );
+        await client.xadd(
+          `${prefix}:${this.name}:events`,
+          '*',
+          'event',
+          'group:failed',
+          'groupId',
+          groupId,
+          'groupName',
+          groupName,
+          'state',
+          'FAILED',
         );
       }
     } else {
-      const groupHashKey = `${prefix}:${this.name}:groups:${groupId}`;
-      const groupName = groupState.name;
-      await client.hset(groupHashKey,
-        'state', 'FAILED',
-        'updatedAt', timestamp,
+      await client.hset(
+        groupHashKey,
+        'state',
+        'FAILED',
+        'updatedAt',
+        timestamp,
       );
       await client.xadd(
         `${prefix}:${this.name}:events`,
         '*',
-        'event', 'group:failed',
-        'groupId', groupId,
-        'groupName', groupName,
-        'state', 'FAILED',
+        'event',
+        'group:failed',
+        'groupId',
+        groupId,
+        'groupName',
+        groupName,
+        'state',
+        'FAILED',
       );
     }
   }

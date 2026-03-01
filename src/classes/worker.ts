@@ -1170,9 +1170,10 @@ will never work with more accuracy than 1ms. */
         returnValue: string;
         jobId: string;
       };
-      const completedJobs: CompletedJobEntry[] = JSON.parse(
-        completedJobsJson || '[]',
-      );
+      const parsedJobs = JSON.parse(completedJobsJson || '[]');
+      const completedJobs: CompletedJobEntry[] = Array.isArray(parsedJobs)
+        ? parsedJobs
+        : [];
 
       await this.scripts.cancelGroupJobs(
         client,
@@ -1208,7 +1209,7 @@ will never work with more accuracy than 1ms. */
         const packed = packer.pack(descriptors);
         await this.scripts.triggerCompensation(
           client,
-          `${group.queueName}:compensation`,
+          `${group.queueName}-compensation`,
           packed,
           groupHashKey,
         );

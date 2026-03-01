@@ -85,7 +85,7 @@ describe('JobGroup - Creation (GRP-1)', () => {
           'nonexistent-job': { name: 'compensate-nonexistent' },
         },
       }),
-    ).rejects.toThrow("does not match any job name");
+    ).rejects.toThrow('does not match any job name');
   });
 
   // VAL-18
@@ -98,11 +98,13 @@ describe('JobGroup - Creation (GRP-1)', () => {
             name: 'job-a',
             queueName,
             data: {},
-            opts: { parent: { id: 'parent-id', queue: `${prefix}:${queueName}` } },
+            opts: {
+              parent: { id: 'parent-id', queue: `${prefix}:${queueName}` },
+            },
           },
         ],
       }),
-    ).rejects.toThrow("must not have opts.parent");
+    ).rejects.toThrow('must not have opts.parent');
   });
 
   it('should store compensation mapping in group metadata', async () => {

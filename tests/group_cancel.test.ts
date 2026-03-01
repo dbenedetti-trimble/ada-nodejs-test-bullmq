@@ -11,7 +11,10 @@ import {
 import { v4 } from 'uuid';
 import { FlowProducer, Queue, Worker, QueueEvents } from '../src/classes';
 import { removeAllQueueData } from '../src/utils';
-import { InvalidGroupStateError, GroupNotFoundError } from '../src/classes/errors';
+import {
+  InvalidGroupStateError,
+  GroupNotFoundError,
+} from '../src/classes/errors';
 
 describe('JobGroup - Manual Cancellation (GRP-6 cancelGroup)', () => {
   const redisHost = process.env.REDIS_HOST || 'localhost';
@@ -42,7 +45,10 @@ describe('JobGroup - Manual Cancellation (GRP-6 cancelGroup)', () => {
     await queueEvents.close();
     await queue.close();
     await removeAllQueueData(new IORedis(redisHost), queueName);
-    await removeAllQueueData(new IORedis(redisHost), `${queueName}:compensation`);
+    await removeAllQueueData(
+      new IORedis(redisHost),
+      `${queueName}-compensation`,
+    );
   });
 
   afterAll(async () => {
@@ -51,32 +57,28 @@ describe('JobGroup - Manual Cancellation (GRP-6 cancelGroup)', () => {
 
   // VAL-10
   it('should cancel pending jobs and trigger compensation for completed jobs', async () => {
+    // job-b and job-c are delayed so they stay in the delayed set while job-a is processed
     const groupNode = await flowProducer.addGroup({
       name: 'cancel-comp-group',
       jobs: [
         { name: 'job-a', queueName, data: {} },
-        { name: 'job-b', queueName, data: {} },
-        { name: 'job-c', queueName, data: {} },
+        { name: 'job-b', queueName, data: {}, opts: { delay: 60000 } },
+        { name: 'job-c', queueName, data: {}, opts: { delay: 60000 } },
       ],
       compensation: {
         'job-a': { name: 'compensate-a' },
       },
     });
 
-    // Process only job-a, then cancel
-    let processedA = false;
     worker = new Worker(
       queueName,
       async job => {
         if (job.name === 'job-a') {
-          processedA = true;
           return { done: 'a' };
         }
-        // Pause: simulate slow jobs
-        await new Promise(r => setTimeout(r, 30000));
         return {};
       },
-      { connection, prefix, concurrency: 1 },
+      { connection, prefix },
     );
 
     // Wait for job-a to complete
@@ -139,9 +141,9 @@ describe('JobGroup - Manual Cancellation (GRP-6 cancelGroup)', () => {
 
     await new Promise(r => setTimeout(r, 500));
 
-    await expect(
-      queue.cancelGroup(groupNode.groupId),
-    ).rejects.toBeInstanceOf(InvalidGroupStateError);
+    await expect(queue.cancelGroup(groupNode.groupId)).rejects.toBeInstanceOf(
+      InvalidGroupStateError,
+    );
   });
 
   it('should throw InvalidGroupStateError when cancelling a COMPENSATING group', async () => {
@@ -176,9 +178,9 @@ describe('JobGroup - Manual Cancellation (GRP-6 cancelGroup)', () => {
 
     const state = await queue.getGroupState(groupNode.groupId);
     if (state!.state === 'COMPENSATING') {
-      await expect(
-        queue.cancelGroup(groupNode.groupId),
-      ).rejects.toBeInstanceOf(InvalidGroupStateError);
+      await expect(queue.cancelGroup(groupNode.groupId)).rejects.toBeInstanceOf(
+        InvalidGroupStateError,
+      );
     }
   });
 
