@@ -8,7 +8,10 @@ import {
   QueueOptions,
   RepeatableJob,
   RepeatOptions,
+  GroupState,
+  GroupJobEntry,
 } from '../interfaces';
+import { InvalidGroupStateError } from './errors';
 import {
   FinishedStatus,
   JobsOptions,
@@ -17,6 +20,7 @@ import {
 } from '../types';
 import { Job } from './job';
 import { QueueGetters } from './queue-getters';
+import { QueueKeys } from './queue-keys';
 import { Repeat } from './repeat';
 import { RedisConnection } from './redis-connection';
 import { SpanKind, TelemetryAttributes } from '../enums';
@@ -1067,10 +1071,23 @@ export class Queue<
    *
    * @param groupId - The group ID to query.
    */
-  async getGroupState(_groupId: string): Promise<any | null> {
-    // TODO(features): delegate to this.scripts.getGroupState() and map the
-    // flat Redis array into a GroupState object.
-    throw new Error('Not implemented');
+  async getGroupState(groupId: string): Promise<GroupState | null> {
+    const raw = await this.scripts.getGroupState(groupId, this.name);
+    if (!raw) {
+      return null;
+    }
+
+    return {
+      id: groupId,
+      name: raw['name'],
+      state: raw['state'] as GroupState['state'],
+      createdAt: Number(raw['createdAt']),
+      updatedAt: Number(raw['updatedAt']),
+      totalJobs: Number(raw['totalJobs']),
+      completedCount: Number(raw['completedCount'] || 0),
+      failedCount: Number(raw['failedCount'] || 0),
+      cancelledCount: Number(raw['cancelledCount'] || 0),
+    };
   }
 
   /**
@@ -1078,10 +1095,30 @@ export class Queue<
    *
    * @param groupId - The group ID to query.
    */
-  async getGroupJobs(_groupId: string): Promise<any[]> {
-    // TODO(features): HGETALL on the group jobs hash key and parse each entry
-    // into a GroupJobEntry (jobId, jobKey, status, queueName).
-    throw new Error('Not implemented');
+  async getGroupJobs(groupId: string): Promise<GroupJobEntry[]> {
+    const client = await this.client;
+    const prefix = this.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+    const groupJobsKey = gk.toGroupJobsKey(this.name, groupId);
+
+    const raw = await client.hgetall(groupJobsKey);
+    if (!raw) {
+      return [];
+    }
+
+    return Object.entries(raw).map(([jobKey, status]) => {
+      // jobKey format: {prefix}:{queueName}:{jobId}
+      const parts = jobKey.split(':');
+      const jobId = parts[parts.length - 1];
+      const queueName = parts.slice(1, parts.length - 1).join(':');
+
+      return {
+        jobId,
+        jobKey,
+        status: status as GroupJobEntry['status'],
+        queueName,
+      };
+    });
   }
 
   /**
@@ -1092,10 +1129,51 @@ export class Queue<
    * @throws InvalidGroupStateError if the group is already COMPLETED, COMPENSATING,
    *         FAILED, or FAILED_COMPENSATION.
    */
-  async cancelGroup(_groupId: string): Promise<void> {
-    // TODO(features): validate state via getGroupState(), then:
-    //   1. Call this.scripts.cancelGroupJobs()
-    //   2. If completed jobs exist, call this.scripts.triggerCompensation()
-    throw new Error('Not implemented');
+  async cancelGroup(groupId: string): Promise<void> {
+    const groupState = await this.getGroupState(groupId);
+
+    if (!groupState) {
+      throw new InvalidGroupStateError(
+        `Group ${groupId} not found`,
+      );
+    }
+
+    const { state } = groupState;
+    if (
+      state === 'COMPLETED' ||
+      state === 'COMPENSATING' ||
+      state === 'FAILED' ||
+      state === 'FAILED_COMPENSATION'
+    ) {
+      throw new InvalidGroupStateError(
+        `Cannot cancel group in state ${state}`,
+      );
+    }
+
+    const completedJobKeys = await this.scripts.cancelGroupJobs(
+      groupId,
+      this.name,
+      Date.now(),
+    );
+
+    if (completedJobKeys.length > 0) {
+      // Get compensation map from the group hash
+      const raw = await this.scripts.getGroupState(groupId, this.name);
+      let compensationMap: Record<string, any> = {};
+      if (raw?.['compensation']) {
+        try {
+          compensationMap = JSON.parse(raw['compensation']);
+        } catch {
+          compensationMap = {};
+        }
+      }
+
+      await this.scripts.triggerCompensation(
+        groupId,
+        this.name,
+        completedJobKeys,
+        compensationMap,
+      );
+    }
   }
 }

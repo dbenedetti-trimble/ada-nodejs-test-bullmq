@@ -114,5 +114,7 @@ export type RedisJobOptions = BaseJobOptions & {
   grp?: {
     id: string;
     name: string;
+    /** Owner queue name (compressed). */
+    qn: string;
   };
 };

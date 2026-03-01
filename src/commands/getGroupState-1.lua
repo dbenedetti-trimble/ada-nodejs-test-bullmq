@@ -8,9 +8,9 @@
 
 local groupHashKey = KEYS[1]
 
--- TODO(features): implement:
---   local exists = redis.call("EXISTS", groupHashKey)
---   if exists == 0 then return nil end
---   return redis.call("HGETALL", groupHashKey)
+local exists = redis.call("EXISTS", groupHashKey)
+if exists == 0 then
+  return nil
+end
 
-return nil
+return redis.call("HGETALL", groupHashKey)

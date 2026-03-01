@@ -25,11 +25,22 @@ local timestamp    = tonumber(ARGV[3])
 local totalJobs    = tonumber(ARGV[4])
 local compensation = ARGV[5]
 
--- TODO(features): implement full atomic group creation:
---   HSET group metadata (name, state, createdAt, updatedAt, totalJobs, completedCount=0,
---        failedCount=0, cancelledCount=0, compensation)
---   ZADD groupsIndexKey timestamp groupId
---   For each jobKey in ARGV[6..N]: HSET groupJobsKey jobKey "pending"
--- Return 1 on success.
+redis.call("HSET", groupHashKey,
+  "name", groupName,
+  "state", "ACTIVE",
+  "createdAt", timestamp,
+  "updatedAt", timestamp,
+  "totalJobs", totalJobs,
+  "completedCount", 0,
+  "failedCount", 0,
+  "cancelledCount", 0,
+  "compensation", compensation
+)
+
+redis.call("ZADD", groupsIndexKey, timestamp, groupId)
+
+for i = 6, #ARGV do
+  redis.call("HSET", groupJobsKey, ARGV[i], "pending")
+end
 
 return 1

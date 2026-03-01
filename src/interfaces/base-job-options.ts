@@ -112,13 +112,11 @@ export interface BaseJobOptions extends DefaultJobOptions {
    * Group membership options. When set, this job belongs to a transactional job group.
    */
   group?: {
-    /**
-     * The group ID this job belongs to.
-     */
+    /** The group ID this job belongs to. */
     id: string;
-    /**
-     * The group name.
-     */
+    /** The group display name. */
     name: string;
+    /** The owner queue name where group metadata is stored. */
+    queueName: string;
   };
 }

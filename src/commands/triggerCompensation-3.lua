@@ -7,25 +7,48 @@
   KEYS[2] compensation queue meta key       {prefix}:{compQueueName}:meta
   KEYS[3] compensation queue events key     {prefix}:{compQueueName}:events
 
-  ARGV[1] key prefix
-  ARGV[2] msgpacked array of compensation job descriptors:
-          Each entry: { jobId, name, data JSON, opts JSON }
+  ARGV[1] key prefix (e.g. "bull")
+  ARGV[2] msgpacked array of compensation job descriptors.
+          Each entry is a table: { name, dataJson, optsJson, timestamp }
 ]]
 
 local waitKey   = KEYS[1]
 local metaKey   = KEYS[2]
 local eventsKey = KEYS[3]
 
-local prefix          = ARGV[1]
-local compensationJobs = ARGV[2]
+local prefix = ARGV[1]
 
--- TODO(features): implement:
---   Unpack ARGV[2] array of compensation job entries.
---   For each entry:
---     1. HINCRBY metaKey "id" 1 to get new job ID
---     2. HSET {prefix}:{compQueueName}:{jobId} with name, data, opts, timestamp
---     3. LPUSH waitKey jobId (FIFO insertion)
---     4. XADD eventsKey * event "added" jobId <id> name <name>
--- Return: number of compensation jobs enqueued
+-- Derive the id counter key and base job key from the wait key
+-- waitKey pattern: {prefix}:{compQueueName}:wait
+local idKey      = waitKey:gsub(":wait$", ":id")
+local baseJobKey = waitKey:gsub(":wait$", ":")
 
-return 0
+local compensationJobs = cmsgpack.unpack(ARGV[2])
+
+local maxEvents = tonumber(redis.call("HGET", metaKey, "mx") or 10000)
+if not maxEvents or maxEvents <= 0 then
+  maxEvents = 10000
+end
+
+local count = 0
+for i = 1, #compensationJobs do
+  local job = compensationJobs[i]
+  local jobId = redis.call("INCR", idKey)
+  local jobKey = baseJobKey .. jobId
+
+  redis.call("HMSET", jobKey,
+    "name",      job[1],
+    "data",      job[2],
+    "opts",      job[3],
+    "timestamp", job[4]
+  )
+
+  redis.call("LPUSH", waitKey, jobId)
+  redis.call("XADD", eventsKey, "MAXLEN", "~", maxEvents, "*",
+    "event", "waiting",
+    "jobId", jobId
+  )
+  count = count + 1
+end
+
+return count

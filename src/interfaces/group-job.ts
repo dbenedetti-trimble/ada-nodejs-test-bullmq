@@ -14,7 +14,10 @@ export interface CompensationJobDefinition {
 }
 
 export interface GroupOptions {
+  /** Display name for the group. */
   name: string;
+  /** The queue namespace that owns the group metadata. */
+  queueName: string;
   jobs: GroupJobDefinition[];
   compensation?: Record<string, CompensationJobDefinition>;
 }

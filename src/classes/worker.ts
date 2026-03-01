@@ -1080,25 +1080,50 @@ will never work with more accuracy than 1ms. */
       );
       this.emit('completed', job, result, 'active');
 
-      // TODO(features): group post-completion hook
-      // if (job.opts?.group?.id) {
-      //   const groupResult = await this.scripts.updateGroupOnFinished(
-      //     job.opts.group.id,
-      //     job.opts.group.name,  // ownerQueueName stored in group.name? Use group.id for queue lookup
-      //     job.toKey(),
-      //     'completed',
-      //     job.returnvalue,
-      //     Date.now(),
-      //   );
-      //   if (groupResult?.trigger === 'compensation') {
-      //     await this.scripts.cancelGroupJobs(job.opts.group.id, job.queueName, Date.now());
-      //     if (groupResult.completedJobsForCompensation?.length) {
-      //       await this.scripts.triggerCompensation(
-      //         job.opts.group.id, job.queueName, groupResult.completedJobsForCompensation, {}
-      //       );
-      //     }
-      //   }
-      // }
+      if (job.opts?.group?.id) {
+        const ownerQueueName = job.opts.group.queueName;
+        const groupResult = await this.scripts.updateGroupOnFinished(
+          job.opts.group.id,
+          ownerQueueName,
+          this.toKey(job.id),
+          'completed',
+          job.returnvalue,
+          Date.now(),
+        );
+        if (groupResult?.trigger === 'compensation') {
+          const completedJobKeys = await this.scripts.cancelGroupJobs(
+            job.opts.group.id,
+            ownerQueueName,
+            Date.now(),
+          );
+          const allCompletedKeys = [
+            ...new Set([
+              ...(groupResult.completedJobsForCompensation || []),
+              ...completedJobKeys,
+            ]),
+          ];
+          if (allCompletedKeys.length > 0) {
+            let compensationMap: Record<string, any> = {};
+            try {
+              const groupStateRaw = await this.scripts.getGroupState(
+                job.opts.group.id,
+                ownerQueueName,
+              );
+              if (groupStateRaw?.['compensation']) {
+                compensationMap = JSON.parse(groupStateRaw['compensation']);
+              }
+            } catch {
+              // ignore
+            }
+            await this.scripts.triggerCompensation(
+              job.opts.group.id,
+              ownerQueueName,
+              allCompletedKeys,
+              compensationMap,
+            );
+          }
+        }
+      }
 
       span?.addEvent('job completed', {
         [TelemetryAttributes.JobResult]: JSON.stringify(result),
@@ -1152,27 +1177,50 @@ will never work with more accuracy than 1ms. */
 
       this.emit('failed', job, err, 'active');
 
-      // TODO(features): group post-failure hook
-      // if (job.opts?.group?.id) {
-      //   const groupResult = await this.scripts.updateGroupOnFinished(
-      //     job.opts.group.id,
-      //     job.queueName,
-      //     job.toKey(),
-      //     'failed',
-      //     undefined,
-      //     Date.now(),
-      //   );
-      //   if (groupResult?.trigger === 'compensation') {
-      //     const completedJobKeys = await this.scripts.cancelGroupJobs(
-      //       job.opts.group.id, job.queueName, Date.now()
-      //     );
-      //     if (completedJobKeys?.length) {
-      //       await this.scripts.triggerCompensation(
-      //         job.opts.group.id, job.queueName, completedJobKeys, {}
-      //       );
-      //     }
-      //   }
-      // }
+      if (job.opts?.group?.id) {
+        const ownerQueueName = job.opts.group.queueName;
+        const groupResult = await this.scripts.updateGroupOnFinished(
+          job.opts.group.id,
+          ownerQueueName,
+          this.toKey(job.id),
+          'failed',
+          undefined,
+          Date.now(),
+        );
+        if (groupResult?.trigger === 'compensation') {
+          const completedJobKeys = await this.scripts.cancelGroupJobs(
+            job.opts.group.id,
+            ownerQueueName,
+            Date.now(),
+          );
+          const allCompletedKeys = [
+            ...new Set([
+              ...(groupResult.completedJobsForCompensation || []),
+              ...completedJobKeys,
+            ]),
+          ];
+          if (allCompletedKeys.length > 0) {
+            let compensationMap: Record<string, any> = {};
+            try {
+              const groupStateRaw = await this.scripts.getGroupState(
+                job.opts.group.id,
+                ownerQueueName,
+              );
+              if (groupStateRaw?.['compensation']) {
+                compensationMap = JSON.parse(groupStateRaw['compensation']);
+              }
+            } catch {
+              // ignore
+            }
+            await this.scripts.triggerCompensation(
+              job.opts.group.id,
+              ownerQueueName,
+              allCompletedKeys,
+              compensationMap,
+            );
+          }
+        }
+      }
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,

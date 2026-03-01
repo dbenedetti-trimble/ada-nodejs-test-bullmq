@@ -42,7 +42,7 @@ export class QueueKeys {
 
   /**
    * Returns the Redis key for the groups index sorted set for a queue.
-   * Key: {prefix}:{queueName}:groups
+   * Pattern: prefix:queueName:groups
    */
   toGroupsIndexKey(queueName: string): string {
     return this.toKey(queueName, 'groups');
@@ -50,7 +50,7 @@ export class QueueKeys {
 
   /**
    * Returns the Redis key for a specific group's metadata hash.
-   * Key: {prefix}:{queueName}:groups:{groupId}
+   * Pattern: prefix:queueName:groups:groupId
    */
   toGroupKey(queueName: string, groupId: string): string {
     return `${this.toGroupsIndexKey(queueName)}:${groupId}`;
@@ -58,7 +58,7 @@ export class QueueKeys {
 
   /**
    * Returns the Redis key for a specific group's job membership hash.
-   * Key: {prefix}:{queueName}:groups:{groupId}:jobs
+   * Pattern: prefix:queueName:groups:groupId:jobs
    */
   toGroupJobsKey(queueName: string, groupId: string): string {
     return `${this.toGroupKey(queueName, groupId)}:jobs`;

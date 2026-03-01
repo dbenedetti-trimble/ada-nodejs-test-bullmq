@@ -19,14 +19,48 @@ local outcome     = ARGV[2]
 local timestamp   = tonumber(ARGV[3])
 local groupId     = ARGV[4]
 
--- TODO(features): implement:
---   1. HINCRBY groupHashKey "compensationCompleted" 1
---   2. If outcome == "failure": set a "compensationFailed" flag
---   3. Compare compensationCompleted against totalCompensationJobs (stored in group hash)
---   4. When all done:
---        If any compensation failed: set state=FAILED_COMPENSATION
---        Else: set state=FAILED
---        XADD group:failed event with groupId, groupName, state
--- Return: final group state string, or nil if compensation not yet complete
+local exists = redis.call("EXISTS", groupHashKey)
+if exists == 0 then
+  return nil
+end
 
-return nil
+local state = redis.call("HGET", groupHashKey, "state")
+-- Only process when in COMPENSATING state
+if state ~= "COMPENSATING" then
+  return nil
+end
+
+redis.call("HINCRBY", groupHashKey, "compensationCompleted", 1)
+
+if outcome == "failure" then
+  redis.call("HINCRBY", groupHashKey, "compensationFailed", 1)
+end
+
+redis.call("HSET", groupHashKey, "updatedAt", timestamp)
+
+local compensationCompleted  = tonumber(redis.call("HGET", groupHashKey, "compensationCompleted"))
+local totalCompensationJobs  = tonumber(redis.call("HGET", groupHashKey, "totalCompensationJobs") or "0")
+local groupName              = redis.call("HGET", groupHashKey, "name")
+
+if totalCompensationJobs == 0 or compensationCompleted < totalCompensationJobs then
+  return nil
+end
+
+local compensationFailed = tonumber(redis.call("HGET", groupHashKey, "compensationFailed") or "0")
+
+local finalState
+if compensationFailed and compensationFailed > 0 then
+  finalState = "FAILED_COMPENSATION"
+else
+  finalState = "FAILED"
+end
+
+redis.call("HSET", groupHashKey, "state", finalState, "updatedAt", timestamp)
+redis.call("XADD", eventsKey, "*",
+  "event", "group:failed",
+  "groupId", groupId,
+  "groupName", groupName,
+  "state", finalState
+)
+
+return finalState

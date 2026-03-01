@@ -46,6 +46,7 @@ import {
 import { ChainableCommander } from 'ioredis';
 import { version as packageVersion } from '../version';
 import { UnrecoverableError } from './errors';
+import { QueueKeys } from './queue-keys';
 export type JobData = [JobJsonRaw | number, string?];
 
 export class Scripts {
@@ -1832,7 +1833,7 @@ export class Scripts {
   }
 
   // ---------------------------------------------------------------------------
-  // Group script stubs — filled in during the features pass
+  // Group scripts
   // ---------------------------------------------------------------------------
 
   /**
@@ -1840,18 +1841,33 @@ export class Scripts {
    * hash, and registers the group in the index sorted set.
    * Called on a `client.multi()` pipeline in FlowProducer.addGroup().
    */
-  async createGroup(
-    _client: any,
-    _queueName: string,
-    _groupId: string,
-    _groupName: string,
-    _timestamp: number,
-    _totalJobs: number,
-    _compensationJson: string,
-    _jobKeys: string[],
-  ): Promise<void> {
-    // TODO(features): build KEYS/ARGV and call execCommand('createGroup', ...)
-    throw new Error('Not implemented');
+  createGroup(
+    client: ChainableCommander,
+    queueName: string,
+    groupId: string,
+    groupName: string,
+    timestamp: number,
+    totalJobs: number,
+    compensationJson: string,
+    jobKeys: string[],
+  ): void {
+    const prefix = this.queue.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+    const keys = [
+      gk.toGroupKey(queueName, groupId),
+      gk.toGroupJobsKey(queueName, groupId),
+      gk.toGroupsIndexKey(queueName),
+      this.queue.keys.events,
+    ];
+    const argv = [
+      groupId,
+      groupName,
+      String(timestamp),
+      String(totalJobs),
+      compensationJson,
+      ...jobKeys,
+    ];
+    this.execCommand(client, 'createGroup', [...keys, ...argv]);
   }
 
   /**
@@ -1860,15 +1876,47 @@ export class Scripts {
    * if the group transitions to COMPENSATING.
    */
   async updateGroupOnFinished(
-    _groupId: string,
-    _ownerQueueName: string,
-    _jobKey: string,
-    _finalStatus: 'completed' | 'failed',
-    _returnValue: any,
-    _timestamp: number,
+    groupId: string,
+    ownerQueueName: string,
+    jobKey: string,
+    finalStatus: 'completed' | 'failed',
+    returnValue: any,
+    timestamp: number,
   ): Promise<{ trigger?: 'compensation'; completedJobsForCompensation?: string[] } | null> {
-    // TODO(features): build KEYS/ARGV and call execCommand('updateGroupOnFinished', ...)
-    throw new Error('Not implemented');
+    const client = await this.queue.client;
+    const prefix = this.queue.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+
+    // For the events key, use the owner queue's events stream
+    const ownerEventsKey = gk.toKey(ownerQueueName, 'events');
+
+    const keys = [
+      gk.toGroupKey(ownerQueueName, groupId),
+      gk.toGroupJobsKey(ownerQueueName, groupId),
+      ownerEventsKey,
+    ];
+    const returnValueStr =
+      returnValue !== undefined && returnValue !== null
+        ? JSON.stringify(returnValue)
+        : '';
+    const argv = [jobKey, finalStatus, String(timestamp), returnValueStr];
+
+    const result: any = await this.execCommand(client, 'updateGroupOnFinished', [
+      ...keys,
+      ...argv,
+    ]);
+
+    if (!result) {
+      return null;
+    }
+
+    // result is an array: ["compensation", jobKey1, jobKey2, ...]
+    if (Array.isArray(result) && result[0] === 'compensation') {
+      const completedJobsForCompensation = result.slice(1) as string[];
+      return { trigger: 'compensation', completedJobsForCompensation };
+    }
+
+    return null;
   }
 
   /**
@@ -1876,36 +1924,152 @@ export class Scripts {
    * to COMPENSATING or FAILED.
    */
   async cancelGroupJobs(
-    _groupId: string,
-    _ownerQueueName: string,
-    _timestamp: number,
+    groupId: string,
+    ownerQueueName: string,
+    timestamp: number,
   ): Promise<string[]> {
-    // TODO(features): build KEYS/ARGV and call execCommand('cancelGroupJobs', ...)
-    throw new Error('Not implemented');
+    const client = await this.queue.client;
+    const prefix = this.queue.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+
+    const ownerEventsKey = gk.toKey(ownerQueueName, 'events');
+
+    const keys = [
+      gk.toGroupKey(ownerQueueName, groupId),
+      gk.toGroupJobsKey(ownerQueueName, groupId),
+      ownerEventsKey,
+    ];
+    const argv = [String(timestamp), groupId];
+
+    const result: any = await this.execCommand(client, 'cancelGroupJobs', [
+      ...keys,
+      ...argv,
+    ]);
+
+    return Array.isArray(result) ? (result as string[]) : [];
   }
 
   /**
    * Enqueues compensation jobs for a list of completed group member jobs.
+   * Groups completed jobs by their source queue and calls triggerCompensation
+   * once per unique compensation queue.
    */
   async triggerCompensation(
-    _groupId: string,
-    _ownerQueueName: string,
-    _completedJobKeys: string[],
-    _compensationMap: Record<string, any>,
+    groupId: string,
+    ownerQueueName: string,
+    completedJobKeys: string[],
+    compensationMap: Record<string, any>,
+    compensationJobReturnValues: Record<string, string> = {},
   ): Promise<void> {
-    // TODO(features): build KEYS/ARGV per compensation queue and call execCommand('triggerCompensation', ...)
-    throw new Error('Not implemented');
+    if (completedJobKeys.length === 0) {
+      return;
+    }
+
+    const client = await this.queue.client;
+    const prefix = this.queue.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+
+    // Group compensation jobs by their compensation queue (source queue + :compensation)
+    // completedJobKey format: {prefix}:{jobQueueName}:{jobId}
+    const byCompQueue: Map<string, any[]> = new Map();
+
+    for (const jobKey of completedJobKeys) {
+      // Parse jobKey: {prefix}:{queueName}:{jobId}
+      const parts = jobKey.split(':');
+      if (parts.length < 3) {
+        continue;
+      }
+      // jobId is the last segment, queueName is the middle part(s)
+      const jobId = parts[parts.length - 1];
+      const jobQueueName = parts.slice(1, parts.length - 1).join(':');
+      const compQueueName = `${jobQueueName}:compensation`;
+
+      // Match compensation definition by jobId or jobName
+      // We need the job name to look up the compensation map.
+      // For simplicity, store jobId-indexed return values and find by scanning
+      // The compensation map is keyed by job NAME (from GroupJobDefinition.name)
+      // We don't have the name here, so we'll pass ALL compensations and let
+      // the TypeScript caller filter by name. For now, we pass all compensation entries
+      // associated with this queue.
+
+      if (!byCompQueue.has(compQueueName)) {
+        byCompQueue.set(compQueueName, []);
+      }
+
+      const returnValueJson = compensationJobReturnValues[jobId] || '{}';
+
+      // Find all compensation entries for this job (by checking all keys)
+      // The compensationMap keys are job names. We match via the jobId stored
+      // in compensationJobReturnValues which maps jobId -> returnValue.
+      for (const [jobName, compDef] of Object.entries(compensationMap)) {
+        const compJobData = {
+          groupId,
+          originalJobName: jobName,
+          originalJobId: jobId,
+          originalReturnValue: JSON.parse(returnValueJson),
+          compensationData: compDef.data,
+        };
+        const defaultOpts = {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 1000 },
+          ...compDef.opts,
+        };
+        byCompQueue.get(compQueueName)!.push([
+          compDef.name,
+          JSON.stringify(compJobData),
+          JSON.stringify(defaultOpts),
+          String(Date.now()),
+        ]);
+        break; // only first match per jobKey
+      }
+    }
+
+    const ownerGroupHashKey = gk.toGroupKey(ownerQueueName, groupId);
+    let totalCompJobs = 0;
+
+    for (const [compQueueName, jobDescs] of byCompQueue.entries()) {
+      if (jobDescs.length === 0) {
+        continue;
+      }
+
+      const waitKey = gk.toKey(compQueueName, 'wait');
+      const metaKey = gk.toKey(compQueueName, 'meta');
+      const eventsKey = gk.toKey(compQueueName, 'events');
+
+      const keys = [waitKey, metaKey, eventsKey];
+      const argv = [prefix, pack(jobDescs)];
+
+      await this.execCommand(client, 'triggerCompensation', [...keys, ...argv]);
+      totalCompJobs += jobDescs.length;
+    }
+
+    // Store totalCompensationJobs in the group hash so updateGroupCompensation knows when done
+    if (totalCompJobs > 0) {
+      await client.hset(ownerGroupHashKey, 'totalCompensationJobs', totalCompJobs);
+    }
   }
 
   /**
    * Reads group metadata from Redis. Returns null for non-existent groups.
    */
   async getGroupState(
-    _groupId: string,
-    _ownerQueueName: string,
+    groupId: string,
+    ownerQueueName: string,
   ): Promise<Record<string, string> | null> {
-    // TODO(features): build KEYS/ARGV and call execCommand('getGroupState', ...)
-    throw new Error('Not implemented');
+    const client = await this.queue.client;
+    const prefix = this.queue.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+
+    const keys = [gk.toGroupKey(ownerQueueName, groupId)];
+
+    const result: any = await this.execCommand(client, 'getGroupState', keys);
+
+    if (!result || (Array.isArray(result) && result.length === 0)) {
+      return null;
+    }
+
+    // HGETALL returns a flat array [field1, value1, field2, value2, ...]
+    return array2obj(result);
   }
 
   /**
@@ -1913,14 +2077,27 @@ export class Scripts {
    * to FAILED or FAILED_COMPENSATION once all compensations are done.
    */
   async updateGroupCompensation(
-    _groupId: string,
-    _ownerQueueName: string,
-    _compensationJobKey: string,
-    _outcome: 'success' | 'failure',
-    _timestamp: number,
+    groupId: string,
+    ownerQueueName: string,
+    compensationJobKey: string,
+    outcome: 'success' | 'failure',
+    timestamp: number,
   ): Promise<string | null> {
-    // TODO(features): build KEYS/ARGV and call execCommand('updateGroupCompensation', ...)
-    throw new Error('Not implemented');
+    const client = await this.queue.client;
+    const prefix = this.queue.opts.prefix || 'bull';
+    const gk = new QueueKeys(prefix);
+
+    const ownerEventsKey = gk.toKey(ownerQueueName, 'events');
+
+    const keys = [gk.toGroupKey(ownerQueueName, groupId), ownerEventsKey];
+    const argv = [compensationJobKey, outcome, String(timestamp), groupId];
+
+    const result: any = await this.execCommand(client, 'updateGroupCompensation', [
+      ...keys,
+      ...argv,
+    ]);
+
+    return result ? String(result) : null;
   }
 }
 

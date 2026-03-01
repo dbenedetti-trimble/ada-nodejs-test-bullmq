@@ -64,6 +64,7 @@ describe('JobGroup edge cases', () => {
   });
 
   // Concurrent failure variant: two jobs fail simultaneously → exactly one compensation cycle
+  // eslint-disable-next-line max-len
   it('initiates exactly one compensation cycle when two jobs fail concurrently (concurrent VAL-05 variant)', async () => {
     // TODO(features): implement
     // - group with jobs processed by two workers that both fail at the same time
