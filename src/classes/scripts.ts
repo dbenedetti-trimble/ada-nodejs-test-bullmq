@@ -1776,7 +1776,7 @@ export class Scripts {
     const dlqJobId = v4();
 
     const dlqMeta: DeadLetterMetadata = {
-      sourceQueue: this.queue.name,
+      sourceQueue: this.queue.toKey('').slice(prefix.length + 1, -1),
       originalJobId: job.id!,
       failedReason,
       stacktrace: job.stacktrace || [],
@@ -1786,7 +1786,11 @@ export class Scripts {
       originalOpts: job.opts,
     };
 
-    const removeOnFail = opts.removeOnFail;
+    const removeOnFail = opts.removeOnFail as
+      | boolean
+      | number
+      | KeepJobs
+      | undefined;
     let removeSourceOnFail = '0';
     if (removeOnFail === true) {
       removeSourceOnFail = '1';
@@ -1853,9 +1857,7 @@ export class Scripts {
 
     const dataJson = await client.hget(this.queue.toKey(dlqJobId), 'data');
     if (!dataJson) {
-      throw new Error(
-        `replayFromDeadLetter: DLQ job ${dlqJobId} not found`,
-      );
+      throw new Error(`replayFromDeadLetter: DLQ job ${dlqJobId} not found`);
     }
 
     const data = JSON.parse(dataJson);
@@ -1878,12 +1880,7 @@ export class Scripts {
       `${sourceBase}:${newJobId}`,
     ];
 
-    const args = [
-      dlqJobId,
-      newJobId,
-      String(timestamp),
-      `${sourceBase}:`,
-    ];
+    const args = [dlqJobId, newJobId, String(timestamp), `${sourceBase}:`];
 
     const result = await this.execCommand(client, 'replayFromDeadLetter', [
       ...keys,
@@ -1912,15 +1909,9 @@ export class Scripts {
     const prefix = this.queue.opts.prefix ?? 'bull';
     const dlqBase = `${prefix}:${dlqQueueName}`;
 
-    const keys = [
-      `${dlqBase}:wait`,
-      `${dlqBase}:`,
-    ];
+    const keys = [`${dlqBase}:wait`, `${dlqBase}:`];
 
-    const args = [
-      filter?.name ?? '',
-      filter?.failedReason ?? '',
-    ];
+    const args = [filter?.name ?? '', filter?.failedReason ?? ''];
 
     return this.execCommand(client, 'purgeDeadLetters', [...keys, ...args]);
   }

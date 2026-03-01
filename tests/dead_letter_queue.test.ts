@@ -155,15 +155,11 @@ describe('Dead Letter Queue', () => {
 
   // VAL-04: Successful job does not go to DLQ
   it('VAL-04: successful job does not end up in the DLQ', async () => {
-    const worker = new Worker(
-      queueName,
-      async () => 'done',
-      {
-        connection,
-        prefix,
-        deadLetterQueue: { queueName: dlqName },
-      },
-    );
+    const worker = new Worker(queueName, async () => 'done', {
+      connection,
+      prefix,
+      deadLetterQueue: { queueName: dlqName },
+    });
     await worker.waitUntilReady();
 
     const completed = new Promise<void>((resolve, reject) => {
@@ -324,7 +320,11 @@ describe('Dead Letter Queue', () => {
     const eventReceived = new Promise<void>((resolve, reject) => {
       (queueEvents as any).once(
         'deadLettered',
-        (args: { jobId: string; deadLetterQueue: string; failedReason: string }) => {
+        (args: {
+          jobId: string;
+          deadLetterQueue: string;
+          failedReason: string;
+        }) => {
           try {
             expect(args.jobId).toBeDefined();
             expect(args.deadLetterQueue).toBe(dlqName);
@@ -450,7 +450,9 @@ describe('Dead Letter Queue', () => {
           const peeked = await dlqQueue.peekDeadLetter(dlqJobs[0].id!);
           expect(peeked).toBeDefined();
           expect((peeked!.data as any)._dlqMeta).toBeDefined();
-          expect((peeked!.data as any)._dlqMeta.failedReason).toBe('peek-error');
+          expect((peeked!.data as any)._dlqMeta.failedReason).toBe(
+            'peek-error',
+          );
           resolve();
         } catch (e) {
           reject(e);
@@ -566,7 +568,9 @@ describe('Dead Letter Queue', () => {
     const allFailed = new Promise<void>(resolve => {
       worker.on('failed', () => {
         failedCount++;
-        if (failedCount >= 2) resolve();
+        if (failedCount >= 2) {
+          resolve();
+        }
       });
     });
 
@@ -605,7 +609,9 @@ describe('Dead Letter Queue', () => {
     const allFailed = new Promise<void>(resolve => {
       worker.on('failed', () => {
         failedCount++;
-        if (failedCount >= 3) resolve();
+        if (failedCount >= 3) {
+          resolve();
+        }
       });
     });
 
@@ -650,7 +656,9 @@ describe('Dead Letter Queue', () => {
     const allFailed = new Promise<void>(resolve => {
       worker.on('failed', () => {
         failedCount++;
-        if (failedCount >= 3) resolve();
+        if (failedCount >= 3) {
+          resolve();
+        }
       });
     });
 
@@ -689,7 +697,9 @@ describe('Dead Letter Queue', () => {
     const allFailed = new Promise<void>(resolve => {
       worker.on('failed', () => {
         failedCount++;
-        if (failedCount >= 3) resolve();
+        if (failedCount >= 3) {
+          resolve();
+        }
       });
     });
 
@@ -726,7 +736,9 @@ describe('Dead Letter Queue', () => {
     const allFailed = new Promise<void>(resolve => {
       worker.on('failed', () => {
         failedCount++;
-        if (failedCount >= 3) resolve();
+        if (failedCount >= 3) {
+          resolve();
+        }
       });
     });
 

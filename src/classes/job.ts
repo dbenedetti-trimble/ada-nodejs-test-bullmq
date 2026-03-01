@@ -862,7 +862,7 @@ export class Job<
           const workerOpts = this.queue.opts as WorkerOptions;
           if (workerOpts.deadLetterQueue) {
             // Terminal failure — route to DLQ instead of the failed sorted set
-            result = await this.scripts.moveToDeadLetter(
+            await this.scripts.moveToDeadLetter(
               this,
               this.failedReason,
               token,
