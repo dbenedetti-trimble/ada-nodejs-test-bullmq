@@ -117,6 +117,17 @@ export interface WorkerListener<
   ) => void;
 
   /**
+   * Listen to 'deadLettered' event.
+   *
+   * This event is triggered when a job has reached terminal failure and been
+   * moved atomically to the configured dead letter queue.
+   */
+  deadLettered: (
+    job: Job<DataType, ResultType, NameType>,
+    deadLetterQueue: string,
+  ) => void;
+
+  /**
    * Listen to 'paused' event.
    *
    * This event is triggered when the queue is paused.
@@ -252,6 +263,14 @@ export class Worker<
       this.opts.maxStartedAttempts < 0
     ) {
       throw new Error('maxStartedAttempts must be greater or equal than 0');
+    }
+
+    if (
+      this.opts.deadLetterQueue !== undefined &&
+      (typeof this.opts.deadLetterQueue.queueName !== 'string' ||
+        this.opts.deadLetterQueue.queueName.trim() === '')
+    ) {
+      throw new Error('deadLetterQueue.queueName must be a non-empty string');
     }
 
     if (
@@ -1131,6 +1150,10 @@ will never work with more accuracy than 1ms. */
       );
 
       this.emit('failed', job, err, 'active');
+
+      if (job.deadLetterJobId && this.opts.deadLetterQueue) {
+        this.emit('deadLettered', job, this.opts.deadLetterQueue.queueName);
+      }
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,

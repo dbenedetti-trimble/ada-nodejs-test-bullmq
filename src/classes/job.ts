@@ -116,6 +116,12 @@ export class Job<
   attemptsMade = 0;
 
   /**
+   * The job ID assigned in the dead letter queue when this job was moved to DLQ.
+   * Set during terminal failure processing; used to signal Worker that DLQ movement occurred.
+   */
+  deadLetterJobId?: string;
+
+  /**
    * Number of times where job has stalled.
    * @defaultValue 0
    */
@@ -859,19 +865,30 @@ export class Job<
             this.recordJobMetrics('retried');
           }
         } else {
-          const args = this.scripts.moveToFailedArgs(
-            this,
-            this.failedReason,
-            this.opts.removeOnFail,
-            token,
-            fetchNext,
-            fieldsToUpdate,
-          );
+          const workerOpts = this.queue.opts as WorkerOptions;
+          if (workerOpts.deadLetterQueue) {
+            // Terminal failure — route to DLQ instead of the failed sorted set
+            this.deadLetterJobId = await this.scripts.moveToDeadLetter(
+              this,
+              this.failedReason,
+              token,
+              workerOpts.deadLetterQueue.queueName,
+            );
+          } else {
+            const args = this.scripts.moveToFailedArgs(
+              this,
+              this.failedReason,
+              this.opts.removeOnFail,
+              token,
+              fetchNext,
+              fieldsToUpdate,
+            );
 
-          result = await this.scripts.moveToFinished(this.id, args);
-          finishedOn = args[
-            this.scripts.moveToFinishedKeys.length + 1
-          ] as number;
+            result = await this.scripts.moveToFinished(this.id, args);
+            finishedOn = args[
+              this.scripts.moveToFinishedKeys.length + 1
+            ] as number;
+          }
 
           // Only record failed metrics when job is not retrying
           this.recordJobMetrics('failed');

@@ -2,6 +2,7 @@ import { v4 } from 'uuid';
 import {
   BaseJobOptions,
   BulkJobOptions,
+  DeadLetterFilter,
   IoredisListener,
   JobSchedulerJson,
   MinimalQueue,
@@ -36,8 +37,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -1026,6 +1028,111 @@ export class Queue<
         } while (cursor);
       },
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dead Letter Queue — inspection & replay API
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns the number of jobs currently in this queue's waiting state.
+   * When used as a DLQ, all dead-lettered jobs land in the waiting list.
+   */
+  async getDeadLetterCount(): Promise<number> {
+    const counts = await this.getJobCounts('waiting');
+    return counts['waiting'] ?? 0;
+  }
+
+  /**
+   * Returns a paginated slice of jobs in this queue's waiting list,
+   * ordered newest-first (LRANGE on the wait key).
+   *
+   * @param start - Zero-based start index.
+   * @param end - Zero-based inclusive end index (-1 for all).
+   */
+  async getDeadLetterJobs(start: number, end: number): Promise<Job[]> {
+    return this.getJobs(['waiting'], start, end, false) as Promise<Job[]>;
+  }
+
+  /**
+   * Returns the job with the given ID, or `undefined` if it does not exist.
+   * When used as a DLQ, the returned job includes `data._dlqMeta`.
+   *
+   * @param jobId - The job ID to look up.
+   */
+  async peekDeadLetter(jobId: string): Promise<Job | undefined> {
+    return this.getJob(jobId) as Promise<Job | undefined>;
+  }
+
+  /**
+   * Replays a single DLQ job back to its original source queue,
+   * removes the job from the DLQ, and returns the new job ID.
+   *
+   * @param jobId - The DLQ job ID to replay.
+   */
+  async replayDeadLetter(jobId: string): Promise<string> {
+    return this.scripts.replayFromDeadLetter(jobId, this.name);
+  }
+
+  /**
+   * Replays all (or filtered) jobs from this DLQ back to their source queues.
+   * Returns the total count of jobs replayed.
+   *
+   * @param filter - Optional filter; if omitted, all jobs are replayed.
+   */
+  async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    let count = 0;
+    const batchSize = 100;
+    // Non-matching jobs stay in the list; offset tracks how many to skip on each fetch.
+    let offset = 0;
+
+    while (true) {
+      const jobs = await this.getJobs(
+        ['waiting'],
+        offset,
+        offset + batchSize - 1,
+        false,
+      );
+      if (!jobs || jobs.length === 0) {break;}
+
+      for (const job of jobs) {
+        if (!job) {
+          offset++;
+          continue;
+        }
+
+        if (filter?.name && job.name !== filter.name) {
+          offset++;
+          continue;
+        }
+
+        if (filter?.failedReason) {
+          const dlqMeta = (job.data as any)?._dlqMeta;
+          const reason = String(dlqMeta?.failedReason ?? '').toLowerCase();
+          if (!reason.includes(filter.failedReason.toLowerCase())) {
+            offset++;
+            continue;
+          }
+        }
+
+        await this.replayDeadLetter(job.id!);
+        count++;
+      }
+
+      if (jobs.length < batchSize) {break;}
+    }
+
+    return count;
+  }
+
+  /**
+   * Removes all (or filtered) jobs from this DLQ.
+   * Returns the total count of jobs removed.
+   *
+   * @param filter - Optional filter; if omitted, all jobs are removed.
+   */
+  async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    return this.scripts.purgeDeadLetters(this.name, filter);
   }
 
   /**
