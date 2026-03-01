@@ -57,7 +57,6 @@ export class Scripts {
   }
 
   private buildContext(): ScriptContext {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
     return {
       opts: this.queue.opts,
@@ -392,10 +391,7 @@ export class Scripts {
     return this.flowScripts.getDependencyCountsArgs(jobId, types);
   }
 
-  async getDependencyCounts(
-    jobId: string,
-    types: string[],
-  ): Promise<number[]> {
+  async getDependencyCounts(jobId: string, types: string[]): Promise<number[]> {
     return this.flowScripts.getDependencyCounts(jobId, types);
   }
 
