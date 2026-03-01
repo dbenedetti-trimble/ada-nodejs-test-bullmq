@@ -47,15 +47,11 @@ describe('Dead Letter Queue', () => {
   it('throws when deadLetterQueue.queueName is empty', () => {
     expect(
       () =>
-        new Worker(
-          queueName,
-          async () => {},
-          {
-            connection,
-            prefix,
-            deadLetterQueue: { queueName: '' },
-          },
-        ),
+        new Worker(queueName, async () => {}, {
+          connection,
+          prefix,
+          deadLetterQueue: { queueName: '' },
+        }),
     ).toThrow('deadLetterQueue.queueName must be a non-empty string');
   });
 
@@ -362,11 +358,7 @@ describe('Dead Letter Queue', () => {
 
   // VAL-13, VAL-14, VAL-15: replayDeadLetter
   it('replayDeadLetter re-enqueues job to source queue with reset attempts', async () => {
-    await queue.add(
-      'replay-job',
-      { val: 42 },
-      { attempts: 1 },
-    );
+    await queue.add('replay-job', { val: 42 }, { attempts: 1 });
 
     const worker = new Worker(
       queueName,
@@ -462,7 +454,9 @@ describe('Dead Letter Queue', () => {
     });
     await worker.close();
 
-    const replayed = await dlqQueue.replayAllDeadLetters({ name: 'send-email' });
+    const replayed = await dlqQueue.replayAllDeadLetters({
+      name: 'send-email',
+    });
     expect(replayed).toBe(2);
     expect(await dlqQueue.getDeadLetterCount()).toBe(1);
 
