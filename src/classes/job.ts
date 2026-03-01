@@ -834,6 +834,21 @@ export class Job<
 
         let finishedOn: number;
         if (shouldRetry) {
+          if (this.queue.shouldLog('job:retrying')) {
+            this.queue.logger!.warn({
+              timestamp: Date.now(),
+              event: 'job:retrying',
+              queue: this.queue.name,
+              jobId: this.id,
+              jobName: this.name,
+              attemptsMade: this.attemptsMade,
+              data: {
+                delay: retryDelay || 0,
+                maxAttempts: this.opts.attempts,
+              },
+            });
+          }
+
           if (retryDelay) {
             // Retry with delay
             result = await this.scripts.moveToDelayed(
@@ -1424,6 +1439,17 @@ export class Job<
     this.delay = finalDelay;
 
     this.recordJobMetrics('delayed');
+
+    if (this.queue.shouldLog('job:delayed')) {
+      this.queue.logger!.debug({
+        timestamp: Date.now(),
+        event: 'job:delayed',
+        queue: this.queue.name,
+        jobId: this.id,
+        jobName: this.name,
+        data: { delay: finalDelay },
+      });
+    }
 
     return movedToDelayed;
   }

@@ -6,6 +6,7 @@ import {
   FlowQueuesOpts,
   FlowOpts,
   IoredisListener,
+  LifecycleLogger,
   ParentOptions,
   QueueBaseOptions,
   RedisClient,
@@ -551,6 +552,8 @@ export class FlowProducer extends EventEmitter {
       redisVersion: this.connection.redisVersion,
       databaseType: this.connection.databaseType,
       trace: async (): Promise<any> => {},
+      logger: undefined as LifecycleLogger | undefined,
+      shouldLog: () => false,
     };
   }
 
