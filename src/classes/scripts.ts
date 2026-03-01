@@ -1830,6 +1830,60 @@ export class Scripts {
     (error as any).code = code;
     return error;
   }
+
+  // ---------------------------------------------------------------------------
+  // Dead Letter Queue methods — stubs to be implemented in the features pass
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Build args array for moveToDeadLetter Lua command.
+   * TODO: implement in features pass
+   */
+  moveToDeadLetterArgs(
+    _job: MinimalJob,
+    _dlqQueueName: string,
+    _dlqJobId: string,
+    _removeOnFail: boolean | number | KeepJobs,
+    _token: string,
+    _fetchNext: boolean,
+    _fieldsToUpdate?: Record<string, any>,
+  ): (string | number | boolean | Buffer)[] {
+    throw new Error('moveToDeadLetterArgs: not yet implemented');
+  }
+
+  /**
+   * Move a terminally failed job from source active list to the DLQ wait list.
+   * TODO: implement in features pass
+   */
+  async moveToDeadLetter(
+    _jobId: string,
+    _args: (string | number | boolean | Buffer)[],
+  ): Promise<void | any[]> {
+    throw new Error('moveToDeadLetter: not yet implemented');
+  }
+
+  /**
+   * Atomically replay a DLQ job back to its original source queue.
+   * TODO: implement in features pass
+   */
+  async replayFromDeadLetter(
+    _dlqJobId: string,
+    _dlqQueueName: string,
+    _prefix: string,
+  ): Promise<string> {
+    throw new Error('replayFromDeadLetter: not yet implemented');
+  }
+
+  /**
+   * Bulk remove DLQ jobs with optional filter.
+   * TODO: implement in features pass
+   */
+  async purgeDeadLetters(
+    _dlqQueueName: string,
+    _filter?: { name?: string; failedReason?: string },
+  ): Promise<number> {
+    throw new Error('purgeDeadLetters: not yet implemented');
+  }
 }
 
 export function raw2NextJobData(raw: any[]) {
