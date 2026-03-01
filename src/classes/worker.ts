@@ -964,6 +964,17 @@ will never work with more accuracy than 1ms. */
 
         const processedOn = Date.now();
 
+        if (this.shouldLog('job:active')) {
+          this.opts.logger!.debug({
+            timestamp: processedOn,
+            event: 'job:active',
+            queue: this.name,
+            jobId: job.id,
+            jobName: job.name,
+            attemptsMade: job.attemptsMade,
+          });
+        }
+
         const abortController = this.lockManager.trackJob(
           job.id,
           token,
@@ -988,6 +999,7 @@ will never work with more accuracy than 1ms. */
                   token,
                   fetchNextCallback,
                   span,
+                  processedOn,
                 );
               },
               { delayInMs: this.opts.runRetryDelay, span },
@@ -1015,6 +1027,7 @@ will never work with more accuracy than 1ms. */
                 token,
                 fetchNextCallback,
                 span,
+                processedOn,
               );
             },
             { delayInMs: this.opts.runRetryDelay, span },
@@ -1033,6 +1046,7 @@ will never work with more accuracy than 1ms. */
                 token,
                 fetchNextCallback,
                 span,
+                processedOn,
               );
             },
             { delayInMs: this.opts.runRetryDelay, span, onlyEmitError: true },
@@ -1071,6 +1085,7 @@ will never work with more accuracy than 1ms. */
     token: string,
     fetchNextCallback = () => true,
     span?: Span,
+    startTime?: number,
   ) {
     if (!this.connection.closing) {
       const completed = await job.moveToCompleted(
@@ -1088,6 +1103,18 @@ will never work with more accuracy than 1ms. */
         [TelemetryAttributes.JobAttemptsMade]: job.attemptsMade,
       });
 
+      if (this.shouldLog('job:completed')) {
+        this.opts.logger!.debug({
+          timestamp: Date.now(),
+          event: 'job:completed',
+          queue: this.name,
+          jobId: job.id,
+          jobName: job.name,
+          attemptsMade: job.attemptsMade,
+          duration: startTime != null ? Date.now() - startTime : undefined,
+        });
+      }
+
       if (Array.isArray(completed)) {
         const [jobData, jobId, rateLimitDelay, delayUntil] = completed;
         this.updateDelays(rateLimitDelay, delayUntil);
@@ -1103,10 +1130,20 @@ will never work with more accuracy than 1ms. */
     token: string,
     fetchNextCallback = () => true,
     span?: Span,
+    startTime?: number,
   ) {
     if (!this.connection.closing) {
       // Check if the job was manually rate-limited
       if (err.message === RATE_LIMIT_ERROR) {
+        if (this.shouldLog('job:rate-limited')) {
+          this.opts.logger!.debug({
+            timestamp: Date.now(),
+            event: 'job:rate-limited',
+            queue: this.name,
+            jobId: job.id,
+            jobName: job.name,
+          });
+        }
         const rateLimitTtl = await this.moveLimitedBackToWait(job, token);
         this.limitUntil = rateLimitTtl > 0 ? Date.now() + rateLimitTtl : 0;
         return;
@@ -1138,6 +1175,22 @@ will never work with more accuracy than 1ms. */
       span?.setAttributes({
         [TelemetryAttributes.JobAttemptsMade]: job.attemptsMade,
       });
+
+      if (job.finishedOn && this.shouldLog('job:failed')) {
+        this.opts.logger!.error({
+          timestamp: Date.now(),
+          event: 'job:failed',
+          queue: this.name,
+          jobId: job.id,
+          jobName: job.name,
+          attemptsMade: job.attemptsMade,
+          duration: startTime != null ? Date.now() - startTime : undefined,
+          data: {
+            failedReason: err.message,
+            stacktrace: err.stack,
+          },
+        });
+      }
 
       // Note: result can be undefined if moveToFailed fails (e.g., lock was lost)
       if (Array.isArray(result)) {
@@ -1413,6 +1466,14 @@ will never work with more accuracy than 1ms. */
             [TelemetryAttributes.JobId]: jobId,
           });
           this.emit('stalled', jobId, 'active');
+          if (this.shouldLog('job:stalled')) {
+            this.opts.logger!.warn({
+              timestamp: Date.now(),
+              event: 'job:stalled',
+              queue: this.name,
+              jobId,
+            });
+          }
         });
       },
     );
