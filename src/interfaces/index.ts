@@ -1,6 +1,7 @@
 export * from './advanced-options';
 export * from './backoff-options';
 export * from './base-job-options';
+export * from './circuit-breaker-options';
 export * from './child-message';
 export * from './connection';
 export * from './flow-job';

@@ -41,6 +41,8 @@ import {
   UnrecoverableError,
 } from './errors';
 import { SpanKind, TelemetryAttributes } from '../enums';
+import { CircuitBreaker } from './circuit-breaker';
+import { CircuitBreakerState } from '../enums/circuit-breaker-state';
 import { JobScheduler } from './job-scheduler';
 import { LockManager } from './lock-manager';
 
@@ -171,6 +173,30 @@ export interface WorkerListener<
    * This event is triggered when locks are successfully renewed.
    */
   locksRenewed: (data: { count: number; jobIds: string[] }) => void;
+
+  /**
+   * Listen to 'circuit:open' event.
+   *
+   * Emitted when the circuit breaker transitions from CLOSED to OPEN after
+   * consecutive failures reach the configured threshold.
+   */
+  'circuit:open': (payload: { failures: number; threshold: number }) => void;
+
+  /**
+   * Listen to 'circuit:half-open' event.
+   *
+   * Emitted when the circuit breaker transitions from OPEN to HALF_OPEN after
+   * the configured duration elapses.
+   */
+  'circuit:half-open': (payload: { duration: number }) => void;
+
+  /**
+   * Listen to 'circuit:closed' event.
+   *
+   * Emitted when the circuit breaker transitions from HALF_OPEN to CLOSED
+   * after a test job completes successfully.
+   */
+  'circuit:closed': (payload: { testJobId: string }) => void;
 }
 
 /**
@@ -193,6 +219,7 @@ export class Worker<
   private blockUntil = 0;
   private _concurrency: number;
   private childPool: ChildPool;
+  private circuitBreaker?: CircuitBreaker;
   private drained = false;
   private limitUntil = 0;
   protected lockManager: LockManager;
@@ -263,6 +290,50 @@ export class Worker<
 
     if (typeof this.opts.drainDelay !== 'number' || this.opts.drainDelay <= 0) {
       throw new Error('drainDelay must be greater than 0');
+    }
+
+    if (this.opts.circuitBreaker) {
+      const cb = this.opts.circuitBreaker;
+      if (
+        typeof cb.threshold !== 'number' ||
+        !Number.isInteger(cb.threshold) ||
+        cb.threshold <= 0
+      ) {
+        throw new Error('circuitBreaker.threshold must be a positive integer');
+      }
+      if (
+        typeof cb.duration !== 'number' ||
+        !Number.isInteger(cb.duration) ||
+        cb.duration <= 0
+      ) {
+        throw new Error('circuitBreaker.duration must be a positive integer');
+      }
+      if (
+        cb.halfOpenMaxAttempts !== undefined &&
+        (typeof cb.halfOpenMaxAttempts !== 'number' ||
+          !Number.isInteger(cb.halfOpenMaxAttempts) ||
+          cb.halfOpenMaxAttempts <= 0)
+      ) {
+        throw new Error(
+          'circuitBreaker.halfOpenMaxAttempts must be a positive integer',
+        );
+      }
+      const halfOpenMaxAttempts = cb.halfOpenMaxAttempts ?? 1;
+      this.circuitBreaker = new CircuitBreaker(
+        { threshold: cb.threshold, duration: cb.duration, halfOpenMaxAttempts },
+        payload => {
+          if (payload.state === CircuitBreakerState.OPEN) {
+            this.emit('circuit:open', {
+              failures: payload.failures,
+              threshold: payload.threshold,
+            });
+          } else if (payload.state === CircuitBreakerState.HALF_OPEN) {
+            this.emit('circuit:half-open', { duration: payload.duration });
+          } else if (payload.state === CircuitBreakerState.CLOSED) {
+            this.emit('circuit:closed', { testJobId: payload.testJobId });
+          }
+        },
+      );
     }
 
     this.concurrency = this.opts.concurrency;
@@ -602,6 +673,10 @@ export class Worker<
         asyncFifoQueue.numTotal() < this._concurrency &&
         !this.isRateLimited()
       ) {
+        if (this.circuitBreaker && !this.circuitBreaker.shouldAllowJob()) {
+          break;
+        }
+
         const token = `${this.id}:${tokenPostfix++}`;
 
         const fetchedJob = this.retryIfFailed<void | Job<
@@ -622,6 +697,12 @@ export class Worker<
         // We await here so that we fetch jobs in sequence, this is important to avoid unnecessary calls
         // to Redis in high concurrency scenarios.
         const job = await fetchedJob;
+
+        // Consume a HALF_OPEN slot only when a real job was fetched, not on
+        // empty-queue polls, to avoid exhausting the counter prematurely.
+        if (job) {
+          this.circuitBreaker?.consumeHalfOpenAttempt();
+        }
 
         // No more jobs waiting but we have others that could start processing already
         if (!job && asyncFifoQueue.numTotal() > 1) {
@@ -652,7 +733,21 @@ export class Worker<
           ),
         );
       } else if (asyncFifoQueue.numQueued() === 0) {
-        await this.waitForRateLimit();
+        if (
+          this.circuitBreaker &&
+          this.circuitBreaker.getState() === CircuitBreakerState.OPEN
+        ) {
+          if (!this.closing) {
+            this.abortDelayController?.abort();
+            this.abortDelayController = new AbortController();
+            await this.delay(
+              this.opts.drainDelay * 1000,
+              this.abortDelayController,
+            );
+          }
+        } else {
+          await this.waitForRateLimit();
+        }
       }
     }
   }
@@ -1079,6 +1174,7 @@ will never work with more accuracy than 1ms. */
         fetchNextCallback() && !(this.closing || this.paused),
       );
       this.emit('completed', job, result, 'active');
+      this.circuitBreaker?.recordSuccess(job.id);
 
       span?.addEvent('job completed', {
         [TelemetryAttributes.JobResult]: JSON.stringify(result),
@@ -1131,6 +1227,7 @@ will never work with more accuracy than 1ms. */
       );
 
       this.emit('failed', job, err, 'active');
+      this.circuitBreaker?.recordFailure();
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,
@@ -1248,6 +1345,7 @@ will never work with more accuracy than 1ms. */
           });
           this.emit('closing', 'closing queue');
           this.abortDelayController?.abort();
+          this.circuitBreaker?.close();
 
           // Define the async cleanup functions
           const asyncCleanups = [
@@ -1278,6 +1376,16 @@ will never work with more accuracy than 1ms. */
     })();
 
     return await this.closing;
+  }
+
+  /**
+   * Returns the current circuit breaker state string, or `undefined` when no
+   * circuit breaker is configured on this worker.
+   */
+  getCircuitBreakerState(): 'closed' | 'open' | 'half-open' | undefined {
+    return this.circuitBreaker
+      ? (this.circuitBreaker.getState() as 'closed' | 'open' | 'half-open')
+      : undefined;
   }
 
   /**
