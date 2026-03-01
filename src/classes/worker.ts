@@ -698,6 +698,12 @@ export class Worker<
         // to Redis in high concurrency scenarios.
         const job = await fetchedJob;
 
+        // Consume a HALF_OPEN slot only when a real job was fetched, not on
+        // empty-queue polls, to avoid exhausting the counter prematurely.
+        if (job) {
+          this.circuitBreaker?.consumeHalfOpenAttempt();
+        }
+
         // No more jobs waiting but we have others that could start processing already
         if (!job && asyncFifoQueue.numTotal() > 1) {
           break;

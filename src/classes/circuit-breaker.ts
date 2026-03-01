@@ -85,7 +85,9 @@ export class CircuitBreaker {
 
   /**
    * Returns true when the worker is allowed to fetch and process a job.
-   * CLOSED → true, OPEN → false, HALF_OPEN → true up to halfOpenMaxAttempts times.
+   * CLOSED → true, OPEN → false, HALF_OPEN → true when attempts remain.
+   * Does NOT consume an attempt — call consumeHalfOpenAttempt() after a job
+   * is actually fetched to avoid decrementing the counter on empty-queue polls.
    */
   shouldAllowJob(): boolean {
     if (this.state === CircuitBreakerState.CLOSED) {
@@ -95,11 +97,20 @@ export class CircuitBreaker {
       return false;
     }
     // HALF_OPEN: allow up to halfOpenMaxAttempts jobs
-    if (this.halfOpenAttemptsLeft > 0) {
+    return this.halfOpenAttemptsLeft > 0;
+  }
+
+  /**
+   * Consumes one HALF_OPEN test-job slot. Must be called only after a job
+   * has been successfully fetched from the queue (not on empty-queue polls).
+   */
+  consumeHalfOpenAttempt(): void {
+    if (
+      this.state === CircuitBreakerState.HALF_OPEN &&
+      this.halfOpenAttemptsLeft > 0
+    ) {
       this.halfOpenAttemptsLeft--;
-      return true;
     }
-    return false;
   }
 
   /**
