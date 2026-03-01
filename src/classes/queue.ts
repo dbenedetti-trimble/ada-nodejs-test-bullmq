@@ -1036,12 +1036,10 @@ export class Queue<
   /**
    * Returns the number of jobs currently in this queue's waiting state.
    * When used as a DLQ, all dead-lettered jobs land in the waiting list.
-   *
-   * @stub Implemented in features pass.
    */
   async getDeadLetterCount(): Promise<number> {
-    // TODO(features): delegate to getJobCounts(['waiting']) and return waiting count
-    throw new Error('getDeadLetterCount: not yet implemented');
+    const counts = await this.getJobCounts('waiting');
+    return counts['waiting'] ?? 0;
   }
 
   /**
@@ -1049,12 +1047,15 @@ export class Queue<
    * ordered newest-first (LRANGE on the wait key).
    *
    * @param start - Zero-based start index.
-   * @param end - Zero-based inclusive end index.
-   * @stub Implemented in features pass.
+   * @param end - Zero-based inclusive end index (-1 for all).
    */
   async getDeadLetterJobs(start: number, end: number): Promise<Job[]> {
-    // TODO(features): delegate to getJobs(['waiting'], start, end, false)
-    throw new Error('getDeadLetterJobs: not yet implemented');
+    return this.getJobs(
+      ['waiting'],
+      start,
+      end,
+      false,
+    ) as Promise<Job[]>;
   }
 
   /**
@@ -1062,11 +1063,9 @@ export class Queue<
    * When used as a DLQ, the returned job includes `data._dlqMeta`.
    *
    * @param jobId - The job ID to look up.
-   * @stub Implemented in features pass.
    */
   async peekDeadLetter(jobId: string): Promise<Job | undefined> {
-    // TODO(features): delegate to getJob(jobId)
-    throw new Error('peekDeadLetter: not yet implemented');
+    return this.getJob(jobId) as Promise<Job | undefined>;
   }
 
   /**
@@ -1074,11 +1073,9 @@ export class Queue<
    * removes the job from the DLQ, and returns the new job ID.
    *
    * @param jobId - The DLQ job ID to replay.
-   * @stub Implemented in features pass.
    */
   async replayDeadLetter(jobId: string): Promise<string> {
-    // TODO(features): call scripts.replayFromDeadLetter(jobId, this.name)
-    throw new Error('replayDeadLetter: not yet implemented');
+    return this.scripts.replayFromDeadLetter(jobId, this.name);
   }
 
   /**
@@ -1086,11 +1083,33 @@ export class Queue<
    * Returns the total count of jobs replayed.
    *
    * @param filter - Optional filter; if omitted, all jobs are replayed.
-   * @stub Implemented in features pass.
    */
   async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
-    // TODO(features): iterate waiting list, apply filter, call replayDeadLetter for each match
-    throw new Error('replayAllDeadLetters: not yet implemented');
+    const jobs = await this.getJobs(['waiting'], 0, -1, false);
+    let count = 0;
+
+    for (const job of jobs) {
+      if (!job) {
+        continue;
+      }
+
+      if (filter?.name && job.name !== filter.name) {
+        continue;
+      }
+
+      if (filter?.failedReason) {
+        const dlqMeta = (job.data as any)?._dlqMeta;
+        const reason = String(dlqMeta?.failedReason ?? '').toLowerCase();
+        if (!reason.includes(filter.failedReason.toLowerCase())) {
+          continue;
+        }
+      }
+
+      await this.replayDeadLetter(job.id!);
+      count++;
+    }
+
+    return count;
   }
 
   /**
@@ -1098,11 +1117,9 @@ export class Queue<
    * Returns the total count of jobs removed.
    *
    * @param filter - Optional filter; if omitted, all jobs are removed.
-   * @stub Implemented in features pass.
    */
   async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
-    // TODO(features): call scripts.purgeDeadLetters(this.name, filter)
-    throw new Error('purgeDeadLetters: not yet implemented');
+    return this.scripts.purgeDeadLetters(this.name, filter);
   }
 
   /**

@@ -12,6 +12,7 @@ const packer = new Packr({
 
 const pack = packer.pack;
 
+import { v4 } from 'uuid';
 import {
   JobJson,
   JobJsonRaw,
@@ -26,6 +27,7 @@ import {
   RetryOptions,
   ScriptQueueContext,
   DeadLetterFilter,
+  DeadLetterMetadata,
 } from '../interfaces';
 import {
   JobsOptions,
@@ -1760,8 +1762,6 @@ export class Scripts {
   /**
    * Atomically moves a terminally-failed job from the source queue's active list
    * to the DLQ queue's waiting list.
-   *
-   * @stub Implemented in features pass.
    */
   async moveToDeadLetter(
     job: MinimalJob,
@@ -1769,35 +1769,160 @@ export class Scripts {
     token: string,
     dlqQueueName: string,
   ): Promise<string> {
-    // TODO(features): build KEYS/ARGS, call 'moveToDeadLetter' Lua script
-    throw new Error('moveToDeadLetter: not yet implemented');
+    const client = await this.queue.client;
+    const opts = this.queue.opts as WorkerOptions;
+    const prefix = this.queue.opts.prefix ?? 'bull';
+    const timestamp = Date.now();
+    const dlqJobId = v4();
+
+    const dlqMeta: DeadLetterMetadata = {
+      sourceQueue: this.queue.name,
+      originalJobId: job.id!,
+      failedReason,
+      stacktrace: job.stacktrace || [],
+      attemptsMade: job.attemptsMade,
+      deadLetteredAt: timestamp,
+      originalTimestamp: job.timestamp,
+      originalOpts: job.opts,
+    };
+
+    const removeOnFail = opts.removeOnFail;
+    let removeSourceOnFail = '0';
+    if (removeOnFail === true) {
+      removeSourceOnFail = '1';
+    } else if (typeof removeOnFail === 'number' && removeOnFail > 0) {
+      removeSourceOnFail = '1';
+    } else if (
+      typeof removeOnFail === 'object' &&
+      removeOnFail !== null &&
+      typeof (removeOnFail as any).count === 'number' &&
+      (removeOnFail as any).count >= 0
+    ) {
+      removeSourceOnFail = '1';
+    }
+
+    const dlqBase = `${prefix}:${dlqQueueName}`;
+
+    const keys = [
+      this.queue.keys.active,
+      this.queue.toKey(job.id!),
+      this.queue.keys.events,
+      `${dlqBase}:wait`,
+      `${dlqBase}:${dlqJobId}`,
+      `${dlqBase}:events`,
+      this.queue.keys.meta,
+    ];
+
+    const args = [
+      job.id!,
+      dlqJobId,
+      JSON.stringify(dlqMeta),
+      String(timestamp),
+      removeSourceOnFail,
+      this.queue.toKey(''),
+      dlqQueueName,
+    ];
+
+    const result = await this.execCommand(client, 'moveToDeadLetter', [
+      ...keys,
+      ...args,
+    ]);
+
+    if (typeof result === 'number' && result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId: job.id,
+        command: 'moveToDeadLetter',
+        state: 'active',
+      });
+    }
+
+    return result as string;
   }
 
   /**
    * Atomically replays a DLQ job back to its source queue's waiting list,
    * removes it from the DLQ, and returns the new job ID in the source queue.
-   *
-   * @stub Implemented in features pass.
    */
   async replayFromDeadLetter(
     dlqJobId: string,
     dlqQueueName: string,
   ): Promise<string> {
-    // TODO(features): build KEYS/ARGS, call 'replayFromDeadLetter' Lua script
-    throw new Error('replayFromDeadLetter: not yet implemented');
+    const client = await this.queue.client;
+    const prefix = this.queue.opts.prefix ?? 'bull';
+
+    const dataJson = await client.hget(this.queue.toKey(dlqJobId), 'data');
+    if (!dataJson) {
+      throw new Error(
+        `replayFromDeadLetter: DLQ job ${dlqJobId} not found`,
+      );
+    }
+
+    const data = JSON.parse(dataJson);
+    const dlqMeta = data._dlqMeta;
+    if (!dlqMeta || !dlqMeta.sourceQueue) {
+      throw new Error(
+        `replayFromDeadLetter: DLQ job ${dlqJobId} missing _dlqMeta.sourceQueue`,
+      );
+    }
+
+    const sourceQueueName = dlqMeta.sourceQueue as string;
+    const sourceBase = `${prefix}:${sourceQueueName}`;
+    const newJobId = v4();
+    const timestamp = Date.now();
+
+    const keys = [
+      this.queue.toKey(dlqJobId),
+      this.queue.keys.wait,
+      `${sourceBase}:wait`,
+      `${sourceBase}:${newJobId}`,
+    ];
+
+    const args = [
+      dlqJobId,
+      newJobId,
+      String(timestamp),
+      `${sourceBase}:`,
+    ];
+
+    const result = await this.execCommand(client, 'replayFromDeadLetter', [
+      ...keys,
+      ...args,
+    ]);
+
+    if (typeof result === 'number' && result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId: dlqJobId,
+        command: 'replayFromDeadLetter',
+      });
+    }
+
+    return result as string;
   }
 
   /**
    * Bulk-removes DLQ jobs matching the given filter, returning the count removed.
-   *
-   * @stub Implemented in features pass.
    */
   async purgeDeadLetters(
     dlqQueueName: string,
     filter?: DeadLetterFilter,
   ): Promise<number> {
-    // TODO(features): build KEYS/ARGS, call 'purgeDeadLetters' Lua script
-    throw new Error('purgeDeadLetters: not yet implemented');
+    const client = await this.queue.client;
+    const prefix = this.queue.opts.prefix ?? 'bull';
+    const dlqBase = `${prefix}:${dlqQueueName}`;
+
+    const keys = [
+      `${dlqBase}:wait`,
+      `${dlqBase}:`,
+    ];
+
+    const args = [
+      filter?.name ?? '',
+      filter?.failedReason ?? '',
+    ];
+
+    return this.execCommand(client, 'purgeDeadLetters', [...keys, ...args]);
   }
 
   finishedErrors({
