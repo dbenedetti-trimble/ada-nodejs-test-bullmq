@@ -1870,7 +1870,7 @@ export class Scripts {
     );
 
     const dlqMeta = {
-      sourceQueue: (this.queue as any).name,
+      sourceQueue: this.queue.name,
       originalJobId: job.id,
       failedReason: job.failedReason || '',
       stacktrace: job.stacktrace || [],

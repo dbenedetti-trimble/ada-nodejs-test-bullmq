@@ -4,6 +4,7 @@ import { KeysMap } from '../classes/queue-keys';
 import { DatabaseType } from '../types/database-type';
 
 export interface ScriptQueueContext {
+  name: string;
   opts: QueueBaseOptions;
   toKey: (type: string) => string;
   keys: KeysMap;

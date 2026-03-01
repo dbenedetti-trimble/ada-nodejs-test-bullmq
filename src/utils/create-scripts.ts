@@ -6,6 +6,7 @@ import { Scripts } from '../classes/scripts';
  */
 export const createScripts = (queue: MinimalQueue) => {
   return new Scripts({
+    name: queue.name,
     keys: queue.keys,
     client: queue.client,
     get redisVersion() {
