@@ -1151,8 +1151,7 @@ will never work with more accuracy than 1ms. */
 
       this.emit('failed', job, err, 'active');
 
-      // TODO: emit deadLettered only when DLQ move actually succeeded (features pass)
-      if (this.opts.deadLetterQueue) {
+      if (this.opts.deadLetterQueue && job.finishedOn) {
         this.emit('deadLettered', job, this.opts.deadLetterQueue.queueName);
       }
 

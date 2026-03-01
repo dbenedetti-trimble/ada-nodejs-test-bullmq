@@ -18,7 +18,7 @@
       ARGV[1]  source job ID
       ARGV[2]  DLQ queue name
       ARGV[3]  DLQ job ID (new UUID)
-      ARGV[4]  packed metadata (msgpack: { sourceQueue, failedReason, stacktrace, attemptsMade, deadLetteredAt, originalTimestamp, originalOpts })
+      ARGV[4]  packed metadata (msgpack: DeadLetterMetadata fields)
       ARGV[5]  timestamp (ms)
       ARGV[6]  removeOnFail flag ('1' = remove source job hash, '' = keep)
 
@@ -36,6 +36,45 @@ local rcall = redis.call
 --- Includes
 --- @include "includes/trimEvents"
 
--- TODO: implement business logic in features pass
--- Stub: return placeholder to allow TypeScript compile and test scaffolding
+if rcall("EXISTS", KEYS[2]) == 0 then
+  return -1
+end
+
+local numRemovedElements = rcall("LREM", KEYS[1], -1, ARGV[1])
+if numRemovedElements < 1 then
+  return -3
+end
+
+local jobFields = rcall("HMGET", KEYS[2], "name", "data", "opts")
+local jobName = jobFields[1]
+local originalData = jobFields[2]
+local jobOpts = jobFields[3]
+
+local meta = cmsgpack.unpack(ARGV[4])
+
+local dataTable = cjson.decode(originalData or "{}")
+dataTable["_dlqMeta"] = meta
+local newData = cjson.encode(dataTable)
+
+rcall("HSET", KEYS[5],
+  "name", jobName,
+  "data", newData,
+  "opts", jobOpts or "{}",
+  "timestamp", ARGV[5],
+  "delay", "0",
+  "priority", "0",
+  "atm", "0"
+)
+
+rcall("LPUSH", KEYS[4], ARGV[3])
+
+trimEvents(KEYS[7], KEYS[6])
+
+rcall("XADD", KEYS[3], "*", "event", "deadLettered", "jobId", ARGV[1], "deadLetterQueue", ARGV[2])
+rcall("XADD", KEYS[6], "*", "event", "waiting", "jobId", ARGV[3])
+
+if ARGV[6] == "1" then
+  rcall("DEL", KEYS[2])
+end
+
 return ARGV[3]

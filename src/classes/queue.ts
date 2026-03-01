@@ -1064,54 +1064,96 @@ export class Queue<
 
   /**
    * Returns the number of jobs currently in this queue's waiting state (DLQ jobs land here).
-   * TODO: implement in features pass (thin wrapper over getWaitingCount)
    */
   async getDeadLetterCount(): Promise<number> {
-    throw new Error('getDeadLetterCount: not yet implemented');
+    return this.getWaitingCount();
   }
 
   /**
    * Returns a paginated list of DLQ jobs ordered by arrival (newest first).
    * @param start - zero-based start index
    * @param end   - zero-based end index (inclusive)
-   * TODO: implement in features pass (thin wrapper over getWaiting)
    */
-  async getDeadLetterJobs(_start: number, _end: number): Promise<Job[]> {
-    throw new Error('getDeadLetterJobs: not yet implemented');
+  async getDeadLetterJobs(start: number, end: number): Promise<Job[]> {
+    return this.getWaiting(start, end);
   }
 
   /**
    * Returns a single DLQ job by ID, or undefined if not found.
-   * TODO: implement in features pass (thin wrapper over getJob)
    */
-  async peekDeadLetter(_jobId: string): Promise<Job | undefined> {
-    throw new Error('peekDeadLetter: not yet implemented');
+  async peekDeadLetter(jobId: string): Promise<Job | undefined> {
+    return this.getJob(jobId);
   }
 
   /**
-   * Replays a single DLQ job back to its original source queue.
-   * Returns the new job ID.
-   * TODO: implement in features pass
+   * Atomically replays a single DLQ job back to its original source queue.
+   * Returns the new source job ID.
    */
-  async replayDeadLetter(_jobId: string): Promise<string> {
-    throw new Error('replayDeadLetter: not yet implemented');
+  async replayDeadLetter(jobId: string): Promise<string> {
+    const dlqJob = await this.getJob(jobId);
+    if (!dlqJob) {
+      throw new Error(`replayDeadLetter: job ${jobId} not found in DLQ`);
+    }
+
+    const dlqMeta = (dlqJob.data as any)?._dlqMeta;
+    if (!dlqMeta?.sourceQueue) {
+      throw new Error(
+        `replayDeadLetter: job ${jobId} is missing _dlqMeta.sourceQueue`,
+      );
+    }
+
+    const prefix = this.opts.prefix || 'bull';
+    const newJobId = v4();
+
+    return this.scripts.replayFromDeadLetter(
+      jobId,
+      this.name,
+      dlqMeta.sourceQueue as string,
+      newJobId,
+      prefix,
+    );
   }
 
   /**
    * Replays all (or filtered) DLQ jobs back to their original source queues.
    * Returns the count of replayed jobs.
-   * TODO: implement in features pass
    */
-  async replayAllDeadLetters(_filter?: DeadLetterFilter): Promise<number> {
-    throw new Error('replayAllDeadLetters: not yet implemented');
+  async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    const jobs = await this.getWaiting(0, -1);
+    if (jobs.length === 0) {
+      return 0;
+    }
+
+    let count = 0;
+    for (const job of jobs) {
+      const dlqMeta = (job.data as any)?._dlqMeta;
+      if (!dlqMeta) {
+        continue;
+      }
+
+      if (filter?.name !== undefined && job.name !== filter.name) {
+        continue;
+      }
+
+      if (filter?.failedReason !== undefined) {
+        const reason: string = (dlqMeta.failedReason || '').toLowerCase();
+        if (!reason.includes(filter.failedReason.toLowerCase())) {
+          continue;
+        }
+      }
+
+      await this.replayDeadLetter(job.id!);
+      count++;
+    }
+
+    return count;
   }
 
   /**
-   * Removes all (or filtered) DLQ jobs.
-   * Returns the count of removed jobs.
-   * TODO: implement in features pass
+   * Removes all (or filtered) DLQ jobs. Returns the count of removed jobs.
    */
-  async purgeDeadLetters(_filter?: DeadLetterFilter): Promise<number> {
-    throw new Error('purgeDeadLetters: not yet implemented');
+  async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    const prefix = this.opts.prefix || 'bull';
+    return this.scripts.purgeDeadLetters(this.name, prefix, filter);
   }
 }

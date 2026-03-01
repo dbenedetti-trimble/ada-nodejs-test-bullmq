@@ -35,6 +35,7 @@ import {
   tryCatch,
   removeUndefinedFields,
 } from '../utils';
+import { v4 } from 'uuid';
 import { createScripts } from '../utils/create-scripts';
 import { Backoffs } from './backoffs';
 import { Scripts } from './scripts';
@@ -861,21 +862,19 @@ export class Job<
         } else {
           const workerOpts = (this.queue.opts as WorkerOptions);
           if (workerOpts?.deadLetterQueue) {
-            // TODO: implement DLQ move in features pass — call scripts.moveToDeadLetter()
-            // Placeholder: fall through to normal failed path until implemented
-            const args = this.scripts.moveToFailedArgs(
+            const dlqJobId = v4();
+            const args = this.scripts.moveToDeadLetterArgs(
               this,
-              this.failedReason,
+              workerOpts.deadLetterQueue.queueName,
+              dlqJobId,
               this.opts.removeOnFail,
               token,
               fetchNext,
               fieldsToUpdate,
             );
 
-            result = await this.scripts.moveToFinished(this.id, args);
-            finishedOn = args[
-              this.scripts.moveToFinishedKeys.length + 1
-            ] as number;
+            await this.scripts.moveToDeadLetter(this.id, args);
+            finishedOn = Date.now();
           } else {
             const args = this.scripts.moveToFailedArgs(
               this,
