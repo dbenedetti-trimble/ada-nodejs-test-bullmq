@@ -29,7 +29,8 @@ export interface BackoffOptions {
   /**
    * Maximum delay in milliseconds. When set to a positive number, the computed
    * delay (after strategy and jitter) is clamped to this value. A value of 0
-   * is treated as "no cap". Applies to all strategies including custom callbacks.
+   * is treated as "no cap". Negative values will cause an error during backoff
+   * calculation. Applies to all strategies including custom callbacks.
    */
   maxDelay?: number;
 

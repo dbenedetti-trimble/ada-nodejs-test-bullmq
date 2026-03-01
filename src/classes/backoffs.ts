@@ -88,10 +88,8 @@ export class Backoffs {
         const clampedDelay = maxDelay ? Math.min(newDelay, maxDelay) : newDelay;
 
         if (job) {
-          await job.updateData({
-            ...job.data,
-            __bullmq_prevDelay: clampedDelay,
-          });
+          (job.data as Record<string, unknown>).__bullmq_prevDelay =
+            clampedDelay;
         }
 
         return clampedDelay;
@@ -121,7 +119,9 @@ export class Backoffs {
   ): Promise<number> | number | undefined {
     if (backoff) {
       if (backoff.maxDelay !== undefined && backoff.maxDelay < 0) {
-        throw new Error('maxDelay must be a positive number or 0.');
+        throw new Error(
+          'maxDelay must be a non-negative number (0 means no cap).',
+        );
       }
 
       const strategy = lookupStrategy(backoff, customStrategy);

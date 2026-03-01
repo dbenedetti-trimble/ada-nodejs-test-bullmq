@@ -308,6 +308,16 @@ export class Worker<
       ) {
         throw new Error('circuitBreaker.duration must be a positive integer');
       }
+      if (
+        cb.halfOpenMaxAttempts !== undefined &&
+        (typeof cb.halfOpenMaxAttempts !== 'number' ||
+          !Number.isInteger(cb.halfOpenMaxAttempts) ||
+          cb.halfOpenMaxAttempts <= 0)
+      ) {
+        throw new Error(
+          'circuitBreaker.halfOpenMaxAttempts must be a positive integer',
+        );
+      }
       const halfOpenMaxAttempts = cb.halfOpenMaxAttempts ?? 1;
       this.circuitBreaker = new CircuitBreaker(
         { threshold: cb.threshold, duration: cb.duration, halfOpenMaxAttempts },

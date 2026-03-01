@@ -259,6 +259,42 @@ describe('Circuit breaker', () => {
       ).toThrow(/threshold/i);
     });
 
+    it('throws when halfOpenMaxAttempts is not a positive integer', () => {
+      expect(
+        () =>
+          new Worker(queueName, async () => {}, {
+            connection,
+            prefix,
+            circuitBreaker: {
+              threshold: 3,
+              duration: 1000,
+              halfOpenMaxAttempts: -1,
+            },
+            autorun: false,
+          }),
+      ).toThrow(
+        'circuitBreaker.halfOpenMaxAttempts must be a positive integer',
+      );
+    });
+
+    it('throws when halfOpenMaxAttempts is a decimal', () => {
+      expect(
+        () =>
+          new Worker(queueName, async () => {}, {
+            connection,
+            prefix,
+            circuitBreaker: {
+              threshold: 3,
+              duration: 1000,
+              halfOpenMaxAttempts: 1.5,
+            },
+            autorun: false,
+          }),
+      ).toThrow(
+        'circuitBreaker.halfOpenMaxAttempts must be a positive integer',
+      );
+    });
+
     it('omitting circuitBreaker produces identical behavior to current BullMQ', async () => {
       const worker = new Worker(queueName, async () => {}, {
         connection,

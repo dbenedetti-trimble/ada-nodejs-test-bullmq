@@ -412,8 +412,16 @@ describe('Backoff strategies', () => {
       };
 
       const effectiveBackoff = errorBackoffs[err.name] ?? undefined;
-      // When effectiveBackoff is undefined, Backoffs.calculate returns undefined
+      // effectiveBackoff is undefined — Backoffs.calculate returns undefined,
+      // which shouldRetryJob treats as immediate retry (0 ms delay).
       expect(effectiveBackoff).toBeUndefined();
+      const result = Backoffs.calculate(
+        effectiveBackoff as unknown as BackoffOptions,
+        1,
+        err,
+        makeJob(),
+      );
+      expect(result).toBeUndefined();
     });
 
     it('omitting errorBackoffs preserves current behavior exactly', async () => {
