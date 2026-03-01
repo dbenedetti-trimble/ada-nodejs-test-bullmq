@@ -117,6 +117,17 @@ export interface WorkerListener<
   ) => void;
 
   /**
+   * Listen to 'deadLettered' event.
+   *
+   * This event is triggered when a job has reached terminal failure and been
+   * moved atomically to the configured dead letter queue.
+   */
+  deadLettered: (
+    job: Job<DataType, ResultType, NameType>,
+    deadLetterQueue: string,
+  ) => void;
+
+  /**
    * Listen to 'paused' event.
    *
    * This event is triggered when the queue is paused.
@@ -1139,6 +1150,10 @@ will never work with more accuracy than 1ms. */
       );
 
       this.emit('failed', job, err, 'active');
+
+      if (job.deadLetterJobId && this.opts.deadLetterQueue) {
+        this.emit('deadLettered', job, this.opts.deadLetterQueue.queueName);
+      }
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,

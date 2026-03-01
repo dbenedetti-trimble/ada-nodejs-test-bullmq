@@ -37,8 +37,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -1050,12 +1051,7 @@ export class Queue<
    * @param end - Zero-based inclusive end index (-1 for all).
    */
   async getDeadLetterJobs(start: number, end: number): Promise<Job[]> {
-    return this.getJobs(
-      ['waiting'],
-      start,
-      end,
-      false,
-    ) as Promise<Job[]>;
+    return this.getJobs(['waiting'], start, end, false) as Promise<Job[]>;
   }
 
   /**
@@ -1085,28 +1081,45 @@ export class Queue<
    * @param filter - Optional filter; if omitted, all jobs are replayed.
    */
   async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
-    const jobs = await this.getJobs(['waiting'], 0, -1, false);
     let count = 0;
+    const batchSize = 100;
+    // Non-matching jobs stay in the list; offset tracks how many to skip on each fetch.
+    let offset = 0;
 
-    for (const job of jobs) {
-      if (!job) {
-        continue;
-      }
+    while (true) {
+      const jobs = await this.getJobs(
+        ['waiting'],
+        offset,
+        offset + batchSize - 1,
+        false,
+      );
+      if (!jobs || jobs.length === 0) {break;}
 
-      if (filter?.name && job.name !== filter.name) {
-        continue;
-      }
-
-      if (filter?.failedReason) {
-        const dlqMeta = (job.data as any)?._dlqMeta;
-        const reason = String(dlqMeta?.failedReason ?? '').toLowerCase();
-        if (!reason.includes(filter.failedReason.toLowerCase())) {
+      for (const job of jobs) {
+        if (!job) {
+          offset++;
           continue;
         }
+
+        if (filter?.name && job.name !== filter.name) {
+          offset++;
+          continue;
+        }
+
+        if (filter?.failedReason) {
+          const dlqMeta = (job.data as any)?._dlqMeta;
+          const reason = String(dlqMeta?.failedReason ?? '').toLowerCase();
+          if (!reason.includes(filter.failedReason.toLowerCase())) {
+            offset++;
+            continue;
+          }
+        }
+
+        await this.replayDeadLetter(job.id!);
+        count++;
       }
 
-      await this.replayDeadLetter(job.id!);
-      count++;
+      if (jobs.length < batchSize) {break;}
     }
 
     return count;

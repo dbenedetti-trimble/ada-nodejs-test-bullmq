@@ -116,6 +116,12 @@ export class Job<
   attemptsMade = 0;
 
   /**
+   * The job ID assigned in the dead letter queue when this job was moved to DLQ.
+   * Set during terminal failure processing; used to signal Worker that DLQ movement occurred.
+   */
+  deadLetterJobId?: string;
+
+  /**
    * Number of times where job has stalled.
    * @defaultValue 0
    */
@@ -862,7 +868,7 @@ export class Job<
           const workerOpts = this.queue.opts as WorkerOptions;
           if (workerOpts.deadLetterQueue) {
             // Terminal failure — route to DLQ instead of the failed sorted set
-            await this.scripts.moveToDeadLetter(
+            this.deadLetterJobId = await this.scripts.moveToDeadLetter(
               this,
               this.failedReason,
               token,
