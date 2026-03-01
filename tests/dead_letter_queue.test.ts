@@ -253,6 +253,7 @@ describe('Dead Letter Queue', () => {
           expect(typeof meta.deadLetteredAt).toBe('number');
           expect(typeof meta.originalTimestamp).toBe('number');
           expect(meta.originalOpts).toBeDefined();
+          expect((dlqJob.data as any).key).toBe('value');
           resolve();
         } catch (e) {
           reject(e);
@@ -506,6 +507,10 @@ describe('Dead Letter Queue', () => {
 
     const waitingCount = await queue.getWaitingCount();
     expect(waitingCount).toBe(1);
+
+    const replayedJobs = await queue.getWaiting(0, 0);
+    expect(replayedJobs[0].data).toEqual({ data: 'original' });
+    expect((replayedJobs[0].data as any)._dlqMeta).toBeUndefined();
   });
 
   // VAL-14: replayDeadLetter returns new job ID
@@ -833,6 +838,180 @@ describe('Dead Letter Queue', () => {
 
     const purged = await dlqQueue.purgeDeadLetters();
     expect(purged).toBe(0);
+  });
+
+  // DLQ-1: Worker constructor validation for deadLetterQueue.queueName
+  it('DLQ-1: Worker throws when deadLetterQueue.queueName is empty or invalid', () => {
+    expect(
+      () =>
+        new Worker(queueName, async () => {}, {
+          connection,
+          prefix,
+          deadLetterQueue: { queueName: '' },
+        }),
+    ).toThrow();
+
+    expect(
+      () =>
+        new Worker(queueName, async () => {}, {
+          connection,
+          prefix,
+          deadLetterQueue: { queueName: '   ' },
+        }),
+    ).toThrow();
+  });
+
+  // DLQ-2: removeOnFail settings respected when job is moved to DLQ
+  it('DLQ-2: source job is removed when removeOnFail is true', async () => {
+    let originalJobId: string | undefined;
+    const worker = new Worker(
+      queueName,
+      async () => {
+        throw new Error('fail');
+      },
+      {
+        connection,
+        prefix,
+        deadLetterQueue: { queueName: dlqName },
+      },
+    );
+    await worker.waitUntilReady();
+
+    const failed = new Promise<void>((resolve, reject) => {
+      worker.once('failed', async (_job, _err) => {
+        try {
+          await delay(50);
+          const sourceJob = await queue.getJob(originalJobId!);
+          expect(sourceJob).toBeUndefined();
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    const job = await queue.add(
+      'test',
+      {},
+      { attempts: 1, removeOnFail: true },
+    );
+    originalJobId = job.id;
+    await failed;
+    await worker.close();
+  });
+
+  it('DLQ-2: source job is removed when removeOnFail is a number', async () => {
+    let originalJobId: string | undefined;
+    const worker = new Worker(
+      queueName,
+      async () => {
+        throw new Error('fail');
+      },
+      {
+        connection,
+        prefix,
+        deadLetterQueue: { queueName: dlqName },
+      },
+    );
+    await worker.waitUntilReady();
+
+    const failed = new Promise<void>((resolve, reject) => {
+      worker.once('failed', async (_job, _err) => {
+        try {
+          await delay(50);
+          const sourceJob = await queue.getJob(originalJobId!);
+          expect(sourceJob).toBeUndefined();
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    const job = await queue.add('test', {}, { attempts: 1, removeOnFail: 1 });
+    originalJobId = job.id;
+    await failed;
+    await worker.close();
+  });
+
+  it('DLQ-2: source job is removed when removeOnFail is a KeepJobs object', async () => {
+    let originalJobId: string | undefined;
+    const worker = new Worker(
+      queueName,
+      async () => {
+        throw new Error('fail');
+      },
+      {
+        connection,
+        prefix,
+        deadLetterQueue: { queueName: dlqName },
+      },
+    );
+    await worker.waitUntilReady();
+
+    const failed = new Promise<void>((resolve, reject) => {
+      worker.once('failed', async (_job, _err) => {
+        try {
+          await delay(50);
+          const sourceJob = await queue.getJob(originalJobId!);
+          expect(sourceJob).toBeUndefined();
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    const job = await queue.add(
+      'test',
+      {},
+      { attempts: 1, removeOnFail: { age: 1000 } },
+    );
+    originalJobId = job.id;
+    await failed;
+    await worker.close();
+  });
+
+  // Non-object job data types preserved through DLQ lifecycle
+  it('handles non-object job data (array) correctly through DLQ and replay', async () => {
+    const arrayData = [1, 2, 3];
+    const worker = new Worker(
+      queueName,
+      async () => {
+        throw new Error('fail');
+      },
+      {
+        connection,
+        prefix,
+        deadLetterQueue: { queueName: dlqName },
+      },
+    );
+    await worker.waitUntilReady();
+
+    const failed = new Promise<void>(resolve => {
+      worker.once('failed', () => resolve());
+    });
+
+    await queue.add('array-job', arrayData as any, { attempts: 1 });
+    await failed;
+    await worker.close();
+    await delay(50);
+
+    const dlqJobs = await dlqQueue.getDeadLetterJobs(0, -1);
+    expect(dlqJobs).toHaveLength(1);
+
+    const dlqJobData = dlqJobs[0].data as any;
+    expect(dlqJobData._dlqMeta).toBeDefined();
+    expect(dlqJobData.__originalData).toEqual(arrayData);
+
+    const dlqJobId = dlqJobs[0].id!;
+    await dlqQueue.replayDeadLetter(dlqJobId);
+
+    const replayedJobs = await queue.getWaiting(0, 0);
+    expect(replayedJobs).toHaveLength(1);
+    expect(replayedJobs[0].data).toEqual(arrayData);
+    expect((replayedJobs[0].data as any)._dlqMeta).toBeUndefined();
+    expect((replayedJobs[0].data as any).__originalData).toBeUndefined();
   });
 
   // VAL-23: No regressions in existing test suite (verified by running `yarn test`)
