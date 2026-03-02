@@ -779,13 +779,19 @@ export class Job<
     ) {
       const opts = this.queue.opts as WorkerOptions;
 
-      const delay = await Backoffs.calculate(
-        <BackoffOptions>this.opts.backoff,
-        this.attemptsMade + 1,
-        err,
-        this,
-        opts.settings && opts.settings.backoffStrategy,
-      );
+      const effectiveBackoff =
+        this.opts.errorBackoffs?.[err?.name] ??
+        (this.opts.backoff as BackoffOptions);
+
+      const delay = effectiveBackoff
+        ? await Backoffs.calculate(
+            effectiveBackoff,
+            this.attemptsMade + 1,
+            err,
+            this,
+            opts.settings && opts.settings.backoffStrategy,
+          )
+        : 0;
 
       return [delay == -1 ? false : true, delay == -1 ? 0 : delay];
     } else {

@@ -32,6 +32,23 @@ export class Backoffs {
         }
       };
     },
+
+    linear: function (delay: number, jitter = 0) {
+      return function (attemptsMade: number): number {
+        const rawDelay = delay * attemptsMade;
+        if (jitter > 0) {
+          const minDelay = rawDelay * (1 - jitter);
+          return Math.floor(Math.random() * rawDelay * jitter + minDelay);
+        }
+        return rawDelay;
+      };
+    },
+
+    polynomial: function (delay: number, jitter = 0) {
+      return function (attemptsMade: number): number {
+        return applyJitter(delay * Math.pow(attemptsMade, 2), jitter);
+      };
+    },
   };
 
   static normalize(
@@ -55,11 +72,77 @@ export class Backoffs {
     customStrategy?: BackoffStrategy,
   ): Promise<number> | number | undefined {
     if (backoff) {
-      const strategy = lookupStrategy(backoff, customStrategy);
+      if (
+        backoff.maxDelay !== undefined &&
+        backoff.maxDelay !== 0 &&
+        backoff.maxDelay < 0
+      ) {
+        throw new Error('maxDelay must be a non-negative number');
+      }
 
-      return strategy(attemptsMade, backoff.type, err, job);
+      if (backoff.type === 'decorrelatedJitter') {
+        const result = Backoffs.calculateDecorrelatedJitter(backoff, job);
+        return clampMaxDelay(result, backoff.maxDelay);
+      }
+
+      if (backoff.type === 'polynomial' && backoff.exponent !== undefined) {
+        const exp = backoff.exponent;
+        if (exp <= 0) {
+          throw new Error('Polynomial exponent must be a positive number');
+        }
+        const rawDelay = backoff.delay! * Math.pow(attemptsMade, exp);
+        const result = applyJitter(rawDelay, backoff.jitter || 0);
+        return clampMaxDelay(result, backoff.maxDelay);
+      }
+
+      const strategy = lookupStrategy(backoff, customStrategy);
+      const rawDelay = strategy(attemptsMade, backoff.type, err, job);
+
+      if (rawDelay instanceof Promise) {
+        return rawDelay.then(d => clampMaxDelay(d, backoff.maxDelay));
+      }
+
+      return clampMaxDelay(rawDelay, backoff.maxDelay);
     }
   }
+
+  private static calculateDecorrelatedJitter(
+    backoff: BackoffOptions,
+    job: MinimalJob,
+  ): number {
+    const baseDelay = backoff.delay || 1000;
+    const data = job.data as Record<string, any>;
+    const prevDelay =
+      typeof data?.__bullmq_prevDelay === 'number'
+        ? data.__bullmq_prevDelay
+        : baseDelay;
+
+    const upper = prevDelay * 3;
+    const computedDelay =
+      baseDelay + Math.floor(Math.random() * (upper - baseDelay));
+    const finalDelay = Math.max(baseDelay, computedDelay);
+
+    if (data && typeof data === 'object') {
+      data.__bullmq_prevDelay = finalDelay;
+    }
+
+    return finalDelay;
+  }
+}
+
+function applyJitter(rawDelay: number, jitter: number): number {
+  if (jitter > 0) {
+    const minDelay = rawDelay * (1 - jitter);
+    return Math.floor(Math.random() * rawDelay * jitter + minDelay);
+  }
+  return rawDelay;
+}
+
+function clampMaxDelay(delay: number, maxDelay: number | undefined): number {
+  if (maxDelay && maxDelay > 0 && delay > maxDelay) {
+    return maxDelay;
+  }
+  return delay;
 }
 
 function lookupStrategy(
