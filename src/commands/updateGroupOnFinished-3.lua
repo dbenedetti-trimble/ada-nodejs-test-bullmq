@@ -11,12 +11,77 @@
     ARGV[2] new status ("completed" or "failed")
     ARGV[3] timestamp (epoch ms)
     ARGV[4] return value (if completed, empty string otherwise)
+    ARGV[5] group name
+    ARGV[6] group ID
 
   Output:
-    nil       - no state transition
-    table     - { transition: string, completedJobs?: string[] }
-                transition is "COMPLETED" or "COMPENSATING"
-                completedJobs is present when transition is "COMPENSATING"
+    0         - no state transition (group still ACTIVE)
+    1         - group transitioned to COMPLETED
+    2         - group transitioned to COMPENSATING (caller must handle compensation)
+    3         - group transitioned to FAILED (no completed jobs to compensate)
+    -1        - group not found or not in ACTIVE/COMPENSATING state
 ]]
--- TODO: implement in features pass
-return nil
+local groupHashKey = KEYS[1]
+local groupJobsKey = KEYS[2]
+local eventStreamKey = KEYS[3]
+
+local jobKey = ARGV[1]
+local newStatus = ARGV[2]
+local timestamp = ARGV[3]
+local returnValue = ARGV[4]
+local groupName = ARGV[5]
+
+local state = redis.call("HGET", groupHashKey, "state")
+if not state then
+  return -1
+end
+
+redis.call("HSET", groupJobsKey, jobKey, newStatus)
+
+if state == "COMPENSATING" then
+  -- Group already compensating; just update the job status, no further transition
+  if newStatus == "completed" then
+    redis.call("HINCRBY", groupHashKey, "completedCount", 1)
+  elseif newStatus == "failed" then
+    redis.call("HINCRBY", groupHashKey, "failedCount", 1)
+  end
+  redis.call("HSET", groupHashKey, "updatedAt", timestamp)
+  return 0
+end
+
+if state ~= "ACTIVE" then
+  return -1
+end
+
+if newStatus == "completed" then
+  local newCompleted = redis.call("HINCRBY", groupHashKey, "completedCount", 1)
+  redis.call("HSET", groupHashKey, "updatedAt", timestamp)
+
+  local totalJobs = tonumber(redis.call("HGET", groupHashKey, "totalJobs"))
+  if newCompleted == totalJobs then
+    redis.call("HSET", groupHashKey, "state", "COMPLETED", "updatedAt", timestamp)
+
+    redis.call("XADD", eventStreamKey, "*",
+      "event", "group:completed",
+      "groupId", ARGV[6] or "",
+      "groupName", groupName)
+
+    return 1
+  end
+  return 0
+
+elseif newStatus == "failed" then
+  redis.call("HINCRBY", groupHashKey, "failedCount", 1)
+  redis.call("HSET", groupHashKey, "updatedAt", timestamp)
+
+  local completedCount = tonumber(redis.call("HGET", groupHashKey, "completedCount"))
+  if completedCount > 0 then
+    redis.call("HSET", groupHashKey, "state", "COMPENSATING", "updatedAt", timestamp)
+    return 2
+  else
+    redis.call("HSET", groupHashKey, "state", "FAILED", "updatedAt", timestamp)
+    return 3
+  end
+end
+
+return 0

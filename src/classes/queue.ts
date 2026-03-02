@@ -2,6 +2,7 @@ import { v4 } from 'uuid';
 import {
   BaseJobOptions,
   BulkJobOptions,
+  CompensationMapping,
   GroupMetadata,
   GroupJobInfo,
   IoredisListener,
@@ -13,14 +14,17 @@ import {
 } from '../interfaces';
 import {
   FinishedStatus,
+  GroupJobStatus,
   JobsOptions,
   JobSchedulerTemplateOptions,
   JobProgress,
 } from '../types';
 import { Job } from './job';
+import { JobGroup } from './job-group';
 import { QueueGetters } from './queue-getters';
 import { Repeat } from './repeat';
 import { RedisConnection } from './redis-connection';
+import { GroupNotFoundError, InvalidGroupStateError } from './errors';
 import { SpanKind, TelemetryAttributes } from '../enums';
 import { JobScheduler } from './job-scheduler';
 import { version } from '../version';
@@ -516,9 +520,17 @@ export class Queue<
    * @param groupId - The unique identifier of the group.
    * @returns The group metadata, or null if the group does not exist.
    */
-  async getGroupState(_groupId: string): Promise<GroupMetadata | null> {
-    // TODO: implement in features pass
-    return null;
+  async getGroupState(groupId: string): Promise<GroupMetadata | null> {
+    const client = await this.client;
+    const rawData = await this.scripts.getGroupStateCommand(client, groupId);
+    if (!rawData || rawData.length === 0) {
+      return null;
+    }
+    const group = JobGroup.fromRedisHash(rawData);
+    if (!group) {
+      return null;
+    }
+    return { ...group.toMetadata(), id: groupId };
   }
 
   /**
@@ -527,9 +539,29 @@ export class Queue<
    * @param groupId - The unique identifier of the group.
    * @returns Array of job info objects with status within the group.
    */
-  async getGroupJobs(_groupId: string): Promise<GroupJobInfo[]> {
-    // TODO: implement in features pass
-    return [];
+  async getGroupJobs(groupId: string): Promise<GroupJobInfo[]> {
+    const client = await this.client;
+    const groupJobsKey = `${this.keys.groups}:${groupId}:jobs`;
+    const rawData = await client.hgetall(groupJobsKey);
+    if (!rawData || Object.keys(rawData).length === 0) {
+      return [];
+    }
+
+    const jobs: GroupJobInfo[] = [];
+    for (const [jobKey, status] of Object.entries(rawData)) {
+      const parts = jobKey.split(':');
+      const jobId = parts.length >= 3 ? parts[2] : jobKey;
+      const queueName = parts.length >= 2 ? parts[1] : this.name;
+
+      jobs.push({
+        jobId,
+        jobKey,
+        status: status as GroupJobStatus,
+        queueName,
+      });
+    }
+
+    return jobs;
   }
 
   /**
@@ -540,9 +572,142 @@ export class Queue<
    * @throws GroupNotFoundError if the group does not exist.
    * @throws InvalidGroupStateError if the group is not in a cancellable state.
    */
-  async cancelGroup(_groupId: string): Promise<void> {
-    // TODO: implement in features pass
-    throw new Error('cancelGroup is not yet implemented');
+  async cancelGroup(groupId: string): Promise<void> {
+    const groupState = await this.getGroupState(groupId);
+    if (!groupState) {
+      throw new GroupNotFoundError(groupId);
+    }
+
+    if (groupState.state === 'COMPLETED') {
+      throw new InvalidGroupStateError(
+        'Cannot cancel a completed group',
+      );
+    }
+
+    if (
+      groupState.state === 'COMPENSATING' ||
+      groupState.state === 'FAILED' ||
+      groupState.state === 'FAILED_COMPENSATION'
+    ) {
+      throw new InvalidGroupStateError(
+        `Cannot cancel a group in '${groupState.state}' state`,
+      );
+    }
+
+    const client = await this.client;
+
+    await this.scripts.cancelGroupJobsCommand(client, groupId);
+
+    if (groupState.completedCount > 0) {
+      const compensationRaw = groupState.compensation;
+      let compensation: CompensationMapping = {};
+      try {
+        compensation = JSON.parse(compensationRaw || '{}');
+      } catch {
+        compensation = {};
+      }
+
+      const groupJobs = await this.getGroupJobs(groupId);
+      const completedJobs = groupJobs.filter(j => j.status === 'completed');
+
+      const compensationJobDefs: any[] = [];
+      for (const job of completedJobs) {
+        const compDef = compensation[job.jobKey] || this.findCompensationByJobName(compensation, job, client);
+        if (compDef) {
+          const compQueueName = `${job.queueName}-compensation`;
+          const prefix = this.opts.prefix || 'bull';
+          const compQueueBase = `${prefix}:${compQueueName}`;
+
+          compensationJobDefs.push({
+            id: v4(),
+            name: compDef.name,
+            data: {
+              groupId,
+              originalJobName: job.jobId,
+              originalJobId: job.jobId,
+              originalReturnValue: null,
+              compensationData: compDef.data || {},
+            },
+            opts: compDef.opts || { attempts: 3, backoff: { type: 'exponential', delay: 1000 } },
+            queueBase: compQueueBase,
+            timestamp: Date.now().toString(),
+          });
+        }
+      }
+
+      if (compensationJobDefs.length > 0) {
+        const prefix = this.opts.prefix || 'bull';
+        const firstJob = completedJobs[0];
+        const compQueueName = `${firstJob.queueName}-compensation`;
+        const compWaitKey = `${prefix}:${compQueueName}:wait`;
+        const compMetaKey = `${prefix}:${compQueueName}:meta`;
+        const compEventsKey = `${prefix}:${compQueueName}:events`;
+
+        await this.scripts.triggerCompensationCommand(
+          client,
+          compWaitKey,
+          compMetaKey,
+          compEventsKey,
+          JSON.stringify(compensationJobDefs),
+        );
+
+        const groupHashKey = `${this.keys.groups}:${groupId}`;
+        await client.hset(groupHashKey,
+          'state', 'COMPENSATING',
+          'totalCompJobs', compensationJobDefs.length.toString(),
+          'compSuccessCount', '0',
+          'compFailureCount', '0',
+          'updatedAt', Date.now().toString(),
+        );
+
+        await client.xadd(this.keys.events, '*',
+          'event', 'group:compensating',
+          'groupId', groupId,
+          'groupName', groupState.name,
+          'failedJobId', '',
+          'reason', 'manual cancellation',
+        );
+      } else {
+        const groupHashKey = `${this.keys.groups}:${groupId}`;
+        await client.hset(groupHashKey,
+          'state', 'FAILED',
+          'updatedAt', Date.now().toString(),
+        );
+
+        await client.xadd(this.keys.events, '*',
+          'event', 'group:failed',
+          'groupId', groupId,
+          'groupName', groupState.name,
+          'state', 'FAILED',
+        );
+      }
+    } else {
+      const groupHashKey = `${this.keys.groups}:${groupId}`;
+      await client.hset(groupHashKey,
+        'state', 'FAILED',
+        'updatedAt', Date.now().toString(),
+      );
+
+      await client.xadd(this.keys.events, '*',
+        'event', 'group:failed',
+        'groupId', groupId,
+        'groupName', groupState.name,
+        'state', 'FAILED',
+      );
+    }
+  }
+
+  private findCompensationByJobName(
+    compensation: CompensationMapping,
+    job: GroupJobInfo,
+    _client: any,
+  ): any {
+    for (const [key, value] of Object.entries(compensation)) {
+      if (job.jobKey.includes(key) || key === job.jobId) {
+        return value;
+      }
+    }
+    return null;
   }
 
   /**

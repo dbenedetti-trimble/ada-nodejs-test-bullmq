@@ -17,5 +17,34 @@
   Output:
     0 - OK
 ]]
--- TODO: implement in features pass
+local groupHashKey = KEYS[1]
+local groupJobsKey = KEYS[2]
+local groupsIndexKey = KEYS[3]
+local eventStreamKey = KEYS[4]
+
+local groupId = ARGV[1]
+local groupName = ARGV[2]
+local timestamp = ARGV[3]
+local totalJobs = ARGV[4]
+local compensationJson = ARGV[5]
+local jobKeysJson = ARGV[6]
+
+redis.call("HSET", groupHashKey,
+  "name", groupName,
+  "state", "ACTIVE",
+  "createdAt", timestamp,
+  "updatedAt", timestamp,
+  "totalJobs", totalJobs,
+  "completedCount", 0,
+  "failedCount", 0,
+  "cancelledCount", 0,
+  "compensation", compensationJson)
+
+local jobKeys = cjson.decode(jobKeysJson)
+for i, jobKey in ipairs(jobKeys) do
+  redis.call("HSET", groupJobsKey, jobKey, "pending")
+end
+
+redis.call("ZADD", groupsIndexKey, timestamp, groupId)
+
 return 0

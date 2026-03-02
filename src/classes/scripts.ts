@@ -1757,61 +1757,124 @@ export class Scripts {
   }
 
   async createGroupCommand(
-    _client: RedisClient | ChainableCommander,
-    _groupId: string,
-    _groupName: string,
-    _totalJobs: number,
-    _compensationJson: string,
-    _jobKeys: string[],
+    client: RedisClient | ChainableCommander,
+    groupId: string,
+    groupName: string,
+    totalJobs: number,
+    compensationJson: string,
+    jobKeys: string[],
   ): Promise<number> {
-    // TODO: implement in features pass
-    return 0;
+    const queueKeys = this.queue.keys;
+    const groupHashKey = `${queueKeys.groups}:${groupId}`;
+    const groupJobsKey = `${queueKeys.groups}:${groupId}:jobs`;
+    const groupsIndexKey = queueKeys.groups;
+    const eventStreamKey = queueKeys.events;
+
+    const keys = [groupHashKey, groupJobsKey, groupsIndexKey, eventStreamKey];
+    const args = [
+      groupId,
+      groupName,
+      Date.now().toString(),
+      totalJobs.toString(),
+      compensationJson,
+      JSON.stringify(jobKeys),
+    ];
+
+    return this.execCommand(client, 'createGroup', keys.concat(args));
   }
 
   async updateGroupOnFinishedCommand(
-    _client: RedisClient | ChainableCommander,
-    _groupId: string,
-    _jobKey: string,
-    _status: 'completed' | 'failed',
-    _returnValue?: string,
-  ): Promise<any> {
-    // TODO: implement in features pass
-    return null;
+    client: RedisClient | ChainableCommander,
+    groupId: string,
+    jobKey: string,
+    status: 'completed' | 'failed',
+    groupName: string,
+    returnValue?: string,
+  ): Promise<number> {
+    const queueKeys = this.queue.keys;
+    const groupHashKey = `${queueKeys.groups}:${groupId}`;
+    const groupJobsKey = `${queueKeys.groups}:${groupId}:jobs`;
+    const eventStreamKey = queueKeys.events;
+
+    const keys = [groupHashKey, groupJobsKey, eventStreamKey];
+    const args = [
+      jobKey,
+      status,
+      Date.now().toString(),
+      returnValue || '',
+      groupName,
+      groupId,
+    ];
+
+    return this.execCommand(
+      client,
+      'updateGroupOnFinished',
+      keys.concat(args),
+    );
   }
 
   async cancelGroupJobsCommand(
-    _client: RedisClient | ChainableCommander,
-    _groupId: string,
+    client: RedisClient | ChainableCommander,
+    groupId: string,
   ): Promise<number> {
-    // TODO: implement in features pass
-    return 0;
+    const queueKeys = this.queue.keys;
+    const groupHashKey = `${queueKeys.groups}:${groupId}`;
+    const groupJobsKey = `${queueKeys.groups}:${groupId}:jobs`;
+    const eventStreamKey = queueKeys.events;
+
+    const keys = [groupHashKey, groupJobsKey, eventStreamKey];
+    const args = [Date.now().toString(), groupId, this.queue.toKey('')];
+
+    return this.execCommand(client, 'cancelGroupJobs', keys.concat(args));
   }
 
   async triggerCompensationCommand(
-    _client: RedisClient | ChainableCommander,
-    _compensationQueuePrefix: string,
-    _compensationJobs: string,
+    client: RedisClient | ChainableCommander,
+    compensationQueueWaitKey: string,
+    compensationQueueMetaKey: string,
+    compensationQueueEventsKey: string,
+    compensationJobsJson: string,
   ): Promise<number> {
-    // TODO: implement in features pass
-    return 0;
+    const keys = [
+      compensationQueueWaitKey,
+      compensationQueueMetaKey,
+      compensationQueueEventsKey,
+    ];
+    const args = [compensationJobsJson];
+
+    return this.execCommand(client, 'triggerCompensation', keys.concat(args));
   }
 
   async getGroupStateCommand(
-    _client: RedisClient | ChainableCommander,
-    _groupId: string,
+    client: RedisClient | ChainableCommander,
+    groupId: string,
   ): Promise<string[]> {
-    // TODO: implement in features pass
-    return [];
+    const queueKeys = this.queue.keys;
+    const groupHashKey = `${queueKeys.groups}:${groupId}`;
+
+    const keys = [groupHashKey];
+
+    return this.execCommand(client, 'getGroupState', keys);
   }
 
   async updateGroupCompensationCommand(
-    _client: RedisClient | ChainableCommander,
-    _groupId: string,
-    _compensationJobKey: string,
-    _result: 'success' | 'failure',
+    client: RedisClient | ChainableCommander,
+    groupId: string,
+    result: 'success' | 'failure',
+    groupName: string,
   ): Promise<string | null> {
-    // TODO: implement in features pass
-    return null;
+    const queueKeys = this.queue.keys;
+    const groupHashKey = `${queueKeys.groups}:${groupId}`;
+    const eventStreamKey = queueKeys.events;
+
+    const keys = [groupHashKey, eventStreamKey];
+    const args = [result, Date.now().toString(), groupName, groupId];
+
+    return this.execCommand(
+      client,
+      'updateGroupCompensation',
+      keys.concat(args),
+    );
   }
 
   finishedErrors({

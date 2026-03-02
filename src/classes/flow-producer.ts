@@ -18,6 +18,7 @@ import { getParentKey, isRedisInstance, trace } from '../utils';
 import { Job } from './job';
 import { KeysMap, QueueKeys } from './queue-keys';
 import { RedisConnection } from './redis-connection';
+import { Scripts } from './scripts';
 import { SpanKind, TelemetryAttributes } from '../enums';
 
 export interface AddNodeOpts {
@@ -565,9 +566,106 @@ export class FlowProducer extends EventEmitter {
    * @param opts - Group creation options including name, jobs, and optional compensation mappings.
    * @returns A GroupNode containing the group ID and created Job instances.
    */
-  async addGroup(_opts: GroupOptions): Promise<GroupNode> {
-    // TODO: implement in features pass — validation, atomic pipeline, group creation
-    throw new Error('addGroup is not yet implemented');
+  async addGroup(opts: GroupOptions): Promise<GroupNode> {
+    if (this.closing) {
+      return;
+    }
+
+    if (!opts.jobs || opts.jobs.length === 0) {
+      throw new Error('Group must contain at least one job');
+    }
+
+    for (const jobDef of opts.jobs) {
+      if (jobDef.opts && (jobDef.opts as any).parent) {
+        throw new Error(
+          'A job cannot belong to both a group and a flow',
+        );
+      }
+    }
+
+    if (opts.compensation) {
+      const jobNames = new Set(opts.jobs.map(j => j.name));
+      for (const key of Object.keys(opts.compensation)) {
+        if (!jobNames.has(key)) {
+          throw new Error(
+            `Compensation key '${key}' does not match any job in the group`,
+          );
+        }
+      }
+    }
+
+    const client = await this.connection.client;
+    const multi = client.multi();
+
+    const groupId = v4();
+    const compensationJson = JSON.stringify(opts.compensation || {});
+
+    const createdJobs: { id?: string; name: string; queueName: string }[] = [];
+    const jobKeys: string[] = [];
+
+    for (const jobDef of opts.jobs) {
+      const prefix = jobDef.prefix || this.opts.prefix;
+      const queue = this.queueFromNode(jobDef, new QueueKeys(prefix), prefix);
+
+      const jobId = jobDef.opts?.jobId || v4();
+
+      const job = new this.Job(
+        queue,
+        jobDef.name,
+        jobDef.data,
+        {
+          ...jobDef.opts,
+          group: { id: groupId, name: opts.name },
+        },
+        jobId,
+      );
+
+      await job.addJob(<Redis>(multi as unknown), {});
+
+      const jobKey = `${prefix}:${jobDef.queueName}:${jobId}`;
+      jobKeys.push(jobKey);
+
+      createdJobs.push({
+        id: jobId,
+        name: jobDef.name,
+        queueName: jobDef.queueName,
+      });
+    }
+
+    const anchorQueue = this.queueFromNode(
+      opts.jobs[0],
+      new QueueKeys(opts.jobs[0].prefix || this.opts.prefix),
+      opts.jobs[0].prefix || this.opts.prefix,
+    );
+    const anchorScripts = new Scripts({
+      keys: anchorQueue.keys,
+      client: this.connection.client,
+      get redisVersion() {
+        return '';
+      },
+      get databaseType() {
+        return '' as any;
+      },
+      toKey: anchorQueue.toKey,
+      opts: anchorQueue.opts,
+      closing: this.closing,
+    });
+
+    await anchorScripts.createGroupCommand(
+      multi as any,
+      groupId,
+      opts.name,
+      opts.jobs.length,
+      compensationJson,
+      jobKeys,
+    );
+
+    await multi.exec();
+
+    return {
+      groupId,
+      jobs: createdJobs,
+    };
   }
 
   /**
