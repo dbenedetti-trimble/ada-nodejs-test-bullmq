@@ -861,13 +861,13 @@ export class Job<
         } else {
           const workerOpts = this.queue.opts as WorkerOptions;
           if (workerOpts.deadLetterQueue?.queueName) {
-            // TODO: Implement in features pass — call scripts.moveToDeadLetter
             const dlqArgs = this.scripts.moveToDeadLetterArgs(
               this,
               this.failedReason,
               workerOpts.deadLetterQueue.queueName,
               token,
               this.opts.removeOnFail,
+              JSON.stringify(this.stacktrace),
             );
 
             await this.scripts.moveToDeadLetter(this.id, dlqArgs);

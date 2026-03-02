@@ -1091,9 +1091,23 @@ export class Queue<
    * @param jobId - The ID of the DLQ job to replay.
    * @returns The new job ID in the source queue.
    */
-  async replayDeadLetter(_jobId: string): Promise<string> {
-    // TODO: Implement in features pass — read _dlqMeta, call scripts.replayFromDeadLetter
-    throw new Error('Not implemented');
+  async replayDeadLetter(jobId: string): Promise<string> {
+    const job = await this.getJob(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found in DLQ`);
+    }
+
+    const dlqMeta = (job.data as any)?._dlqMeta;
+    if (!dlqMeta || !dlqMeta.sourceQueue) {
+      throw new Error(
+        `Job ${jobId} does not have valid DLQ metadata (_dlqMeta.sourceQueue)`,
+      );
+    }
+
+    const prefix = this.opts.prefix || 'bull';
+    const sourceQueuePrefix = `${prefix}:${dlqMeta.sourceQueue}:`;
+
+    return this.scripts.replayFromDeadLetter(jobId, sourceQueuePrefix);
   }
 
   /**
@@ -1102,9 +1116,33 @@ export class Queue<
    * @param filter - Optional filter by job name and/or failedReason substring.
    * @returns The number of jobs replayed.
    */
-  async replayAllDeadLetters(_filter?: DeadLetterFilter): Promise<number> {
-    // TODO: Implement in features pass — iterate DLQ jobs matching filter, call replayDeadLetter for each
-    return 0;
+  async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    const jobs = await this.getWaiting(0, -1);
+    let replayed = 0;
+
+    for (const job of jobs) {
+      if (filter) {
+        if (filter.name && job.name !== filter.name) {
+          continue;
+        }
+        const dlqMeta = (job.data as any)?._dlqMeta;
+        if (filter.failedReason && dlqMeta) {
+          const reason = (dlqMeta.failedReason || '').toLowerCase();
+          if (!reason.includes(filter.failedReason.toLowerCase())) {
+            continue;
+          }
+        }
+      }
+
+      try {
+        await this.replayDeadLetter(job.id);
+        replayed++;
+      } catch {
+        // Skip jobs that fail to replay (e.g., missing metadata)
+      }
+    }
+
+    return replayed;
   }
 
   /**

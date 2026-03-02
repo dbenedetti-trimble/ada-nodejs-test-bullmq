@@ -1763,23 +1763,27 @@ export class Scripts {
     dlqQueueName: string,
     token: string,
     removeOnFail: undefined | boolean | number | KeepJobs,
+    stacktrace?: string,
   ): (string | number | Buffer)[] {
     const queueKeys = this.queue.keys;
+    const prefix = this.queue.opts.prefix || 'bull';
+    const dlqPrefix = `${prefix}:${dlqQueueName}:`;
+    const dlqJobId = Date.now().toString();
 
     const keys: (string | number | Buffer)[] = [
       queueKeys.active,
       this.queue.toKey(job.id ?? ''),
       queueKeys.events,
-      this.queue.toKey(''), // placeholder for DLQ wait key
-      this.queue.toKey(''), // placeholder for DLQ job hash key
-      this.queue.toKey(''), // placeholder for DLQ events stream key
-      this.queue.toKey(''), // placeholder for DLQ meta key
+      `${dlqPrefix}wait`,
+      `${dlqPrefix}${dlqJobId}`,
+      `${dlqPrefix}events`,
+      `${dlqPrefix}meta`,
     ];
 
     const args = [
       this.queue.toKey(''),
       job.id,
-      '', // DLQ job id placeholder
+      dlqJobId,
       dlqQueueName,
       Date.now(),
       failedReason,
@@ -1787,6 +1791,7 @@ export class Scripts {
       pack({
         keepJobs: this.getKeepJobs(removeOnFail, undefined),
       }),
+      stacktrace || '[]',
     ];
 
     return keys.concat(args);
@@ -1815,13 +1820,11 @@ export class Scripts {
     jobId: string,
     sourceQueuePrefix: string,
   ): (string | number)[] {
-    const queueKeys = this.queue.keys;
-
     const keys: (string | number)[] = [
       this.queue.toKey(jobId),
-      queueKeys.wait,
-      this.queue.toKey(''), // placeholder for source queue wait key
-      this.queue.toKey(''), // placeholder for source queue id key
+      this.queue.keys.wait,
+      `${sourceQueuePrefix}wait`,
+      `${sourceQueuePrefix}id`,
     ];
 
     const args = [jobId, sourceQueuePrefix, Date.now()];
@@ -1829,11 +1832,28 @@ export class Scripts {
     return keys.concat(args);
   }
 
-  async replayFromDeadLetter(jobId: string): Promise<string> {
+  async replayFromDeadLetter(
+    jobId: string,
+    sourceQueuePrefix: string,
+  ): Promise<string> {
     const client = await this.queue.client;
 
-    // TODO: Build proper args and call execCommand in features pass
-    throw new Error('Not implemented');
+    const args = this.replayFromDeadLetterArgs(jobId, sourceQueuePrefix);
+    const result = await this.execCommand(
+      client,
+      'replayFromDeadLetter',
+      args,
+    );
+
+    if (result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId,
+        command: 'replayFromDeadLetter',
+      });
+    }
+
+    return String(result);
   }
 
   purgeDeadLettersArgs(filter?: DeadLetterFilter): (string | number)[] {
