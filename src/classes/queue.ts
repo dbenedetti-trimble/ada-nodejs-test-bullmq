@@ -1076,8 +1076,7 @@ export class Queue<
    * @param end - Zero-based end index (inclusive)
    */
   async getDeadLetterJobs(start: number, end: number): Promise<Job[]> {
-    // TODO(features): implement getDeadLetterJobs (ordered newest first)
-    return this.getWaiting(start, end);
+    return this.getJobs(['waiting'], start, end, false) as Promise<Job[]>;
   }
 
   /**

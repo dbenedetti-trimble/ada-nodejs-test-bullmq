@@ -1285,6 +1285,7 @@ will never work with more accuracy than 1ms. */
               return force || this.whenCurrentJobsFinished(false);
             },
             () => this.lockManager.close(),
+            () => this._dlqQueue?.close(),
             () => this.childPool?.clean(),
             () => this.blockingConnection.close(force),
             () => this.connection.close(force),
