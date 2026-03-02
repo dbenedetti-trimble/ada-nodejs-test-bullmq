@@ -101,6 +101,22 @@ export interface QueueEventsListener extends IoredisListener {
   ) => void;
 
   /**
+   * Listen to 'deadLettered' event.
+   *
+   * This event is triggered when a job is moved to a dead letter queue after terminal failure.
+   *
+   * @param args - An object containing details about the dead-lettered job.
+   *  - `jobId` - The unique identifier of the job that was dead-lettered.
+   *  - `deadLetterQueue` - The name of the dead letter queue the job was moved to.
+   *  - `failedReason` - The reason the job failed.
+   * @param id - The identifier of the event.
+   */
+  deadLettered: (
+    args: { jobId: string; deadLetterQueue: string; failedReason: string },
+    id: string,
+  ) => void;
+
+  /**
    * Listen to 'delayed' event.
    *
    * This event is triggered when a job is scheduled with a delay before it becomes active.

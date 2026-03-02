@@ -859,22 +859,40 @@ export class Job<
             this.recordJobMetrics('retried');
           }
         } else {
-          const args = this.scripts.moveToFailedArgs(
-            this,
-            this.failedReason,
-            this.opts.removeOnFail,
-            token,
-            fetchNext,
-            fieldsToUpdate,
-          );
+          const workerOpts = this.queue.opts as WorkerOptions;
+          if (workerOpts.deadLetterQueue?.queueName) {
+            const dlqArgs = this.scripts.moveToDeadLetterArgs(
+              this,
+              this.failedReason,
+              workerOpts.deadLetterQueue.queueName,
+              token,
+              this.opts.removeOnFail,
+              JSON.stringify(this.stacktrace),
+            );
 
-          result = await this.scripts.moveToFinished(this.id, args);
-          finishedOn = args[
-            this.scripts.moveToFinishedKeys.length + 1
-          ] as number;
+            await this.scripts.moveToDeadLetter(this.id, dlqArgs);
 
-          // Only record failed metrics when job is not retrying
-          this.recordJobMetrics('failed');
+            this.recordJobMetrics('failed');
+
+            result = 'deadLettered' as any;
+          } else {
+            const args = this.scripts.moveToFailedArgs(
+              this,
+              this.failedReason,
+              this.opts.removeOnFail,
+              token,
+              fetchNext,
+              fieldsToUpdate,
+            );
+
+            result = await this.scripts.moveToFinished(this.id, args);
+            finishedOn = args[
+              this.scripts.moveToFinishedKeys.length + 1
+            ] as number;
+
+            // Only record failed metrics when job is not retrying
+            this.recordJobMetrics('failed');
+          }
         }
 
         if (finishedOn && typeof finishedOn === 'number') {
