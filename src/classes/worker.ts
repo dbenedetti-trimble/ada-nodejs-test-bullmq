@@ -17,6 +17,7 @@ import {
   Span,
   WorkerOptions,
 } from '../interfaces';
+import { Queue } from './queue';
 import { JobProgress } from '../types';
 import { Processor } from '../types/processor';
 import {
@@ -171,6 +172,18 @@ export interface WorkerListener<
    * This event is triggered when locks are successfully renewed.
    */
   locksRenewed: (data: { count: number; jobIds: string[] }) => void;
+
+  /**
+   * Listen to 'deadLettered' event.
+   *
+   * This event is triggered when a job is moved to the dead letter queue
+   * after terminal failure (retries exhausted or UnrecoverableError).
+   */
+  deadLettered: (
+    job: Job<DataType, ResultType, NameType>,
+    deadLetterQueue: string,
+    failedReason: string,
+  ) => void;
 }
 
 /**
@@ -201,6 +214,7 @@ export class Worker<
   private stalledCheckStopper?: () => void;
   private waiting: Promise<number> | null = null;
   private _repeat: Repeat; // To be deprecated in v6 in favor of Job Scheduler
+  private _dlqQueue: Queue | null = null;
 
   protected _jobScheduler: JobScheduler;
 
@@ -263,6 +277,22 @@ export class Worker<
 
     if (typeof this.opts.drainDelay !== 'number' || this.opts.drainDelay <= 0) {
       throw new Error('drainDelay must be greater than 0');
+    }
+
+    if (
+      this.opts.deadLetterQueue !== undefined &&
+      (typeof this.opts.deadLetterQueue.queueName !== 'string' ||
+        this.opts.deadLetterQueue.queueName.trim() === '')
+    ) {
+      throw new Error('deadLetterQueue.queueName must be a non-empty string');
+    }
+
+    if (this.opts.deadLetterQueue) {
+      this._dlqQueue = new Queue(this.opts.deadLetterQueue.queueName, {
+        connection: opts.connection,
+        prefix: (opts as any).prefix,
+        skipMetasUpdate: true,
+      });
     }
 
     this.concurrency = this.opts.concurrency;
@@ -1132,6 +1162,21 @@ will never work with more accuracy than 1ms. */
 
       this.emit('failed', job, err, 'active');
 
+      if (this.opts.deadLetterQueue?.queueName && !Array.isArray(result)) {
+        const isTerminal =
+          err instanceof UnrecoverableError ||
+          err.name === 'UnrecoverableError' ||
+          job.attemptsMade >= (job.opts.attempts || 1);
+        if (isTerminal) {
+          this.emit(
+            'deadLettered',
+            job,
+            this.opts.deadLetterQueue.queueName,
+            err.message,
+          );
+        }
+      }
+
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,
       });
@@ -1255,6 +1300,7 @@ will never work with more accuracy than 1ms. */
               return force || this.whenCurrentJobsFinished(false);
             },
             () => this.lockManager.close(),
+            () => this._dlqQueue?.close(),
             () => this.childPool?.clean(),
             () => this.blockingConnection.close(force),
             () => this.connection.close(force),

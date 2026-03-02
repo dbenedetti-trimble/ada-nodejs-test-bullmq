@@ -25,7 +25,10 @@ import {
   RetryJobOpts,
   RetryOptions,
   ScriptQueueContext,
+  DeadLetterFilter,
+  DeadLetterMetadata,
 } from '../interfaces';
+import { v4 } from 'uuid';
 import {
   JobsOptions,
   JobState,
@@ -1829,6 +1832,175 @@ export class Scripts {
     // Add the code property to the error object
     (error as any).code = code;
     return error;
+  }
+
+  /**
+   * Atomically moves a job from the source queue's active list to the DLQ
+   * queue's wait list on terminal failure.
+   *
+   * @param job - The job being dead-lettered
+   * @param failedReason - Error message from the final failure
+   * @param dlqQueueName - Target DLQ queue name
+   * @param token - Lock token for the job
+   * @param fetchNext - Whether to fetch the next job after completion
+   * @returns DLQ job ID
+   */
+  async moveToDeadLetter<T = any, R = any, N extends string = string>(
+    job: MinimalJob<T, R, N>,
+    failedReason: string,
+    dlqQueueName: string,
+    token: string,
+    _fetchNext: boolean,
+  ): Promise<string> {
+    const client = await this.queue.client;
+    const queueKeys = this.queue.keys;
+    const prefix = (this.queue.opts as any).prefix || 'bull';
+    const dlqPrefix = `${prefix}:${dlqQueueName}:`;
+    const dlqJobId = v4();
+    const timestamp = Date.now();
+
+    const dlqMeta: DeadLetterMetadata = {
+      sourceQueue: (this.queue as any).name,
+      originalJobId: job.id,
+      failedReason,
+      stacktrace: (job.stacktrace as string[]) || [],
+      attemptsMade: job.attemptsMade + 1,
+      deadLetteredAt: timestamp,
+      originalTimestamp: job.timestamp,
+      originalOpts: job.opts,
+    };
+
+    const isObjectData = typeof job.data === 'object' && job.data !== null;
+    const dlqData = JSON.stringify(
+      isObjectData
+        ? { ...(job.data as object), _dlqMeta: dlqMeta }
+        : { _originalData: job.data, _dlqMeta: dlqMeta },
+    );
+    const optsJson = JSON.stringify(job.opts);
+
+    const workerOpts = this.queue.opts as WorkerOptions;
+    const keepJobs = this.getKeepJobs(
+      job.opts.removeOnFail,
+      workerOpts.removeOnFail,
+    );
+    const removeNow = keepJobs.count === 0;
+
+    const keys = [
+      queueKeys.active, // KEYS[1] source active list
+      this.queue.toKey(job.id), // KEYS[2] source job hash
+      queueKeys.events, // KEYS[3] source events stream
+      `${dlqPrefix}wait`, // KEYS[4] DLQ wait list
+      `${dlqPrefix}${dlqJobId}`, // KEYS[5] DLQ job hash
+      `${dlqPrefix}events`, // KEYS[6] DLQ events stream
+      queueKeys.meta, // KEYS[7] source meta (for trimEvents)
+    ];
+
+    const args = [
+      job.id, // ARGV[1]
+      dlqJobId, // ARGV[2]
+      timestamp.toString(), // ARGV[3]
+      dlqQueueName, // ARGV[4]
+      dlqData, // ARGV[5]
+      job.name, // ARGV[6]
+      optsJson, // ARGV[7]
+      token, // ARGV[8]
+      removeNow ? '1' : '0', // ARGV[9]
+      failedReason, // ARGV[10]
+      (job.attemptsMade + 1).toString(), // ARGV[11]
+      ((job.opts.attempts as number) || 0).toString(), // ARGV[12]
+      queueKeys.stalled, // ARGV[13]
+    ];
+
+    const result = await this.execCommand(client, 'moveToDeadLetter', [
+      ...keys,
+      ...args,
+    ]);
+
+    if (typeof result === 'number' && result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId: job.id,
+        command: 'moveToDeadLetter',
+        state: 'active',
+      });
+    }
+
+    return result as string;
+  }
+
+  /**
+   * Atomically replays a DLQ job back to its source queue.
+   *
+   * @param dlqJobId - The DLQ job ID to replay
+   * @param sourceQueueName - The source queue name (from _dlqMeta)
+   * @param originalData - Original job data without _dlqMeta
+   * @param jobName - Original job name
+   * @param originalOpts - Original job options
+   * @returns New job ID in the source queue
+   */
+  async replayFromDeadLetter(
+    dlqJobId: string,
+    sourceQueueName: string,
+    originalData: any,
+    jobName: string,
+    originalOpts: any,
+  ): Promise<string> {
+    const client = await this.queue.client;
+    const prefix = (this.queue.opts as any).prefix || 'bull';
+    const newJobId = v4();
+    const timestamp = Date.now();
+    const srcPrefix = `${prefix}:${sourceQueueName}:`;
+
+    const keys = [
+      this.queue.toKey(dlqJobId), // KEYS[1] DLQ job hash
+      this.queue.keys.wait, // KEYS[2] DLQ wait list
+      `${srcPrefix}wait`, // KEYS[3] source wait list
+      `${srcPrefix}${newJobId}`, // KEYS[4] source job hash (new)
+    ];
+
+    const args = [
+      dlqJobId, // ARGV[1]
+      newJobId, // ARGV[2]
+      timestamp.toString(), // ARGV[3]
+      JSON.stringify(originalData), // ARGV[4]
+      jobName, // ARGV[5]
+      JSON.stringify(originalOpts || {}), // ARGV[6]
+      `${srcPrefix}events`, // ARGV[7] source events stream
+    ];
+
+    const result = await this.execCommand(client, 'replayFromDeadLetter', [
+      ...keys,
+      ...args,
+    ]);
+
+    if (result === -1) {
+      throw new Error(`DLQ job ${dlqJobId} not found. replayFromDeadLetter`);
+    }
+
+    return result as string;
+  }
+
+  /**
+   * Bulk-removes DLQ jobs from the queue's wait list, with optional filtering.
+   *
+   * @param filter - Optional filter by name and/or failedReason substring
+   * @returns Count of jobs removed
+   */
+  async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    const client = await this.queue.client;
+
+    const keys = [
+      this.queue.keys.wait, // KEYS[1] DLQ wait list
+      this.queue.keys[''], // KEYS[2] prefix placeholder
+    ];
+
+    const args = [
+      filter?.name || '', // ARGV[1]
+      filter?.failedReason || '', // ARGV[2]
+      this.queue.keys[''], // ARGV[3] key prefix for hash construction
+    ];
+
+    return this.execCommand(client, 'purgeDeadLetters', [...keys, ...args]);
   }
 }
 

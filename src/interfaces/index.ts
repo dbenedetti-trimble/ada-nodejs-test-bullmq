@@ -1,4 +1,5 @@
 export * from './advanced-options';
+export * from './dead-letter-options';
 export * from './backoff-options';
 export * from './base-job-options';
 export * from './child-message';

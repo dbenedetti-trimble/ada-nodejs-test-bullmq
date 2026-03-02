@@ -127,7 +127,7 @@ describe('[FEATURE_NAME] - Redis Cluster', () => {
       });
       await queueEvents.waitUntilReady();
 
-      const completed = new Promise<string>((resolve) => {
+      const completed = new Promise<string>(resolve => {
         queueEvents.on('completed', ({ jobId }) => {
           resolve(jobId);
         });
