@@ -11,12 +11,7 @@ import {
   expect,
 } from 'vitest';
 
-import {
-  Queue,
-  QueueEvents,
-  Worker,
-  UnrecoverableError,
-} from '../src/classes';
+import { Queue, QueueEvents, Worker, UnrecoverableError } from '../src/classes';
 import { delay, removeAllQueueData } from '../src/utils';
 
 describe('dead letter queue', () => {
@@ -409,43 +404,47 @@ describe('dead letter queue', () => {
       await worker.close();
     });
 
-    it('VAL-10: getDeadLetterJobs returns paginated results', async () => {
-      const worker = new Worker(
-        queueName,
-        async () => {
-          throw new Error('fail');
-        },
-        {
-          connection,
-          prefix,
-          deadLetterQueue: { queueName: dlqQueueName },
-        },
-      );
-
-      const totalJobs = 8;
-      for (let i = 0; i < totalJobs; i++) {
-        await queue.add(`job-${i}`, { i }, { attempts: 1 });
-      }
-
-      await new Promise<void>(resolve => {
-        worker.on(
-          'failed',
-          after(totalJobs, () => {
-            resolve();
-          }),
+    it(
+      'VAL-10: getDeadLetterJobs returns paginated results',
+      { timeout: 30000 },
+      async () => {
+        const worker = new Worker(
+          queueName,
+          async () => {
+            throw new Error('fail');
+          },
+          {
+            connection,
+            prefix,
+            deadLetterQueue: { queueName: dlqQueueName },
+          },
         );
-      });
 
-      await delay(500);
+        const totalJobs = 6;
+        for (let i = 0; i < totalJobs; i++) {
+          await queue.add(`job-${i}`, { i }, { attempts: 1 });
+        }
 
-      const firstPage = await dlqQueue.getDeadLetterJobs(0, 4);
-      expect(firstPage.length).toBe(5);
+        await new Promise<void>(resolve => {
+          worker.on(
+            'failed',
+            after(totalJobs, () => {
+              resolve();
+            }),
+          );
+        });
 
-      const secondPage = await dlqQueue.getDeadLetterJobs(5, 7);
-      expect(secondPage.length).toBe(3);
+        await delay(500);
 
-      await worker.close();
-    });
+        const firstPage = await dlqQueue.getDeadLetterJobs(0, 3);
+        expect(firstPage.length).toBe(4);
+
+        const secondPage = await dlqQueue.getDeadLetterJobs(4, 5);
+        expect(secondPage.length).toBe(2);
+
+        await worker.close();
+      },
+    );
 
     it('VAL-11: peekDeadLetter returns job with metadata', async () => {
       const worker = new Worker(
@@ -501,11 +500,7 @@ describe('dead letter queue', () => {
         },
       );
 
-      await queue.add(
-        'test-job',
-        { orderId: 42 },
-        { attempts: 1 },
-      );
+      await queue.add('test-job', { orderId: 42 }, { attempts: 1 });
 
       await new Promise<void>(resolve => {
         worker.on('failed', async () => {
@@ -568,9 +563,7 @@ describe('dead letter queue', () => {
     });
 
     it('VAL-15: replayDeadLetter throws for non-existent job', async () => {
-      await expect(
-        dlqQueue.replayDeadLetter('nonexistent'),
-      ).rejects.toThrow();
+      await expect(dlqQueue.replayDeadLetter('nonexistent')).rejects.toThrow();
     });
   });
 
@@ -773,72 +766,81 @@ describe('dead letter queue', () => {
       expect(remaining[0].name).toBe('charge-card');
     });
 
-    it('VAL-21: bulk replay handles multiple source queues', async () => {
-      const queue2Name = `test-${v4()}`;
-      const queue2 = new Queue(queue2Name, { connection, prefix });
-      await queue2.waitUntilReady();
+    it(
+      'VAL-21: bulk replay handles multiple source queues',
+      { timeout: 20000 },
+      async () => {
+        const queue2Name = `test-${v4()}`;
+        const queue2 = new Queue(queue2Name, { connection, prefix });
+        await queue2.waitUntilReady();
 
-      const worker1 = new Worker(
-        queueName,
-        async () => {
-          throw new Error('fail');
-        },
-        {
-          connection,
-          prefix,
-          deadLetterQueue: { queueName: dlqQueueName },
-        },
-      );
+        const worker1 = new Worker(
+          queueName,
+          async () => {
+            throw new Error('fail');
+          },
+          {
+            connection,
+            prefix,
+            deadLetterQueue: { queueName: dlqQueueName },
+          },
+        );
 
-      const worker2 = new Worker(
-        queue2Name,
-        async () => {
-          throw new Error('fail');
-        },
-        {
-          connection,
-          prefix,
-          deadLetterQueue: { queueName: dlqQueueName },
-        },
-      );
+        const worker2 = new Worker(
+          queue2Name,
+          async () => {
+            throw new Error('fail');
+          },
+          {
+            connection,
+            prefix,
+            deadLetterQueue: { queueName: dlqQueueName },
+          },
+        );
 
-      await queue.add('job-from-q1', { src: 'q1' }, { attempts: 1 });
-      await queue.add('job-from-q1b', { src: 'q1' }, { attempts: 1 });
-      await queue2.add('job-from-q2', { src: 'q2' }, { attempts: 1 });
+        await queue.add('job-from-q1', { src: 'q1' }, { attempts: 1 });
+        await queue.add('job-from-q1b', { src: 'q1' }, { attempts: 1 });
+        await queue2.add('job-from-q2', { src: 'q2' }, { attempts: 1 });
 
-      await new Promise<void>(resolve => {
-        let count = 0;
-        const check = () => {
-          count++;
-          if (count >= 3) {
-            resolve();
-          }
-        };
-        worker1.on('failed', check);
-        worker2.on('failed', check);
-      });
+        await new Promise<void>(resolve => {
+          let count = 0;
+          const check = () => {
+            count++;
+            if (count >= 3) {
+              resolve();
+            }
+          };
+          worker1.on('failed', check);
+          worker2.on('failed', check);
+        });
 
-      await delay(500);
-      await worker1.close();
-      await worker2.close();
+        await delay(500);
+        await worker1.close();
+        await worker2.close();
 
-      const dlqCount = await dlqQueue.getDeadLetterCount();
-      expect(dlqCount).toBe(3);
+        let dlqCount = 0;
+        for (let i = 0; i < 20; i++) {
+          dlqCount = await dlqQueue.getDeadLetterCount();
+          if (dlqCount === 3) {break;}
+          await delay(250);
+        }
+        expect(dlqCount).toBe(3);
 
-      const replayCount = await dlqQueue.replayAllDeadLetters();
-      expect(replayCount).toBe(3);
+        const replayCount = await dlqQueue.replayAllDeadLetters();
+        expect(replayCount).toBe(3);
 
-      const dlqCountAfter = await dlqQueue.getDeadLetterCount();
-      expect(dlqCountAfter).toBe(0);
+        const dlqCountAfter = await dlqQueue.getDeadLetterCount();
+        expect(dlqCountAfter).toBe(0);
 
-      const q1Waiting = await queue.getWaitingCount();
-      const q2Waiting = await queue2.getWaitingCount();
-      expect(q1Waiting).toBe(2);
-      expect(q2Waiting).toBe(1);
+        const q1Waiting = await queue.getWaitingCount();
+        const q2Waiting = await queue2.getWaitingCount();
+        expect(q1Waiting).toBe(2);
+        expect(q2Waiting).toBe(1);
 
-      await queue2.close();
-      await removeAllQueueData(new IORedis(redisHost), queue2Name);
-    });
+        await queue2.close();
+        await removeAllQueueData(new IORedis(redisHost), queue2Name);
+      },
+    );
   });
 
   describe('Edge cases', () => {

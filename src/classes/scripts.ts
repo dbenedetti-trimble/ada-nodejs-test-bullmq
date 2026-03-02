@@ -1768,7 +1768,7 @@ export class Scripts {
     const queueKeys = this.queue.keys;
     const prefix = this.queue.opts.prefix || 'bull';
     const dlqPrefix = `${prefix}:${dlqQueueName}:`;
-    const dlqJobId = Date.now().toString();
+    const dlqJobId = `dlq-${job.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const keys: (string | number | Buffer)[] = [
       queueKeys.active,
@@ -1839,11 +1839,7 @@ export class Scripts {
     const client = await this.queue.client;
 
     const args = this.replayFromDeadLetterArgs(jobId, sourceQueuePrefix);
-    const result = await this.execCommand(
-      client,
-      'replayFromDeadLetter',
-      args,
-    );
+    const result = await this.execCommand(client, 'replayFromDeadLetter', args);
 
     if (result < 0) {
       throw this.finishedErrors({
@@ -1859,10 +1855,7 @@ export class Scripts {
   purgeDeadLettersArgs(filter?: DeadLetterFilter): (string | number)[] {
     const queueKeys = this.queue.keys;
 
-    const keys: (string | number)[] = [
-      queueKeys.wait,
-      this.queue.toKey(''),
-    ];
+    const keys: (string | number)[] = [queueKeys.wait, this.queue.toKey('')];
 
     const args = [filter?.name ?? '', filter?.failedReason ?? ''];
 

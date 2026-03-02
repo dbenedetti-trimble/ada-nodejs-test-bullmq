@@ -873,6 +873,8 @@ export class Job<
             await this.scripts.moveToDeadLetter(this.id, dlqArgs);
 
             this.recordJobMetrics('failed');
+
+            result = 'deadLettered' as any;
           } else {
             const args = this.scripts.moveToFailedArgs(
               this,

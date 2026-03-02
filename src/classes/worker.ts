@@ -282,9 +282,7 @@ export class Worker<
       (typeof this.opts.deadLetterQueue.queueName !== 'string' ||
         !this.opts.deadLetterQueue.queueName.trim())
     ) {
-      throw new Error(
-        'deadLetterQueue.queueName must be a non-empty string',
-      );
+      throw new Error('deadLetterQueue.queueName must be a non-empty string');
     }
 
     this.concurrency = this.opts.concurrency;
@@ -1153,6 +1151,18 @@ will never work with more accuracy than 1ms. */
       );
 
       this.emit('failed', job, err, 'active');
+
+      if (
+        (result as unknown) === 'deadLettered' &&
+        this.opts.deadLetterQueue?.queueName
+      ) {
+        this.emit(
+          'deadLettered',
+          job,
+          this.opts.deadLetterQueue.queueName,
+          err.message,
+        );
+      }
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,

@@ -102,6 +102,12 @@ rcall("HMSET", dlqJobKey,
 rcall("RPUSH", dlqWaitKey, dlqJobId)
 
 rcall("XADD", srcEventsKey, "*",
+  "event", "failed",
+  "jobId", jobId,
+  "failedReason", failedReason,
+  "prev", "active")
+
+rcall("XADD", srcEventsKey, "*",
   "event", "deadLettered",
   "jobId", jobId,
   "deadLetterQueue", dlqQueueName,
