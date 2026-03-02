@@ -93,7 +93,7 @@ describe('dead letter queue', () => {
     await queue.add('test-job', { orderId: 42 }, { attempts: 3 });
 
     await new Promise<void>(resolve => {
-      queue.on('deadLettered', () => resolve());
+      worker.on('deadLettered', () => resolve());
     });
 
     const failedJobs = await queue.getFailed(0, 10);
@@ -129,7 +129,7 @@ describe('dead letter queue', () => {
     await queue.add('test-job', { x: 1 }, { attempts: 5 });
 
     await new Promise<void>(resolve => {
-      queue.on('deadLettered', () => resolve());
+      worker.on('deadLettered', () => resolve());
     });
 
     const dlqJobs = await dlqQueue.getDeadLetterJobs(0, 10);
@@ -200,7 +200,7 @@ describe('dead letter queue', () => {
 
     // Wait for all retries to exhaust
     await new Promise<void>(resolve => {
-      queue.on('deadLettered', () => resolve());
+      worker.on('deadLettered', () => resolve());
     });
 
     const dlqCount = await dlqQueue.getDeadLetterCount();
@@ -234,7 +234,7 @@ describe('dead letter queue', () => {
     );
 
     await new Promise<void>(resolve => {
-      queue.on('deadLettered', () => resolve());
+      worker.on('deadLettered', () => resolve());
     });
 
     const dlqJobs = await dlqQueue.getDeadLetterJobs(0, 10);
@@ -273,7 +273,7 @@ describe('dead letter queue', () => {
     await queue.add('send-email', { to: 'user@example.com' }, { attempts: 1 });
 
     await new Promise<void>(resolve => {
-      queue.on('deadLettered', () => resolve());
+      worker.on('deadLettered', () => resolve());
     });
 
     const dlqJobs = await dlqQueue.getDeadLetterJobs(0, 10);
@@ -333,7 +333,7 @@ describe('dead letter queue', () => {
 
     await new Promise<void>(resolve => {
       let count = 0;
-      queue.on('deadLettered', () => {
+      worker.on('deadLettered', () => {
         count++;
         if (count === 5) {
           resolve();
@@ -368,7 +368,7 @@ describe('dead letter queue', () => {
 
     await new Promise<void>(resolve => {
       let count = 0;
-      queue.on('deadLettered', () => {
+      worker.on('deadLettered', () => {
         count++;
         if (count === 15) {
           resolve();
@@ -402,7 +402,7 @@ describe('dead letter queue', () => {
     await queue.add('test-job', { x: 99 }, { attempts: 1 });
 
     await new Promise<void>(resolve => {
-      queue.on('deadLettered', () => resolve());
+      worker.on('deadLettered', () => resolve());
     });
 
     const dlqJobs = await dlqQueue.getDeadLetterJobs(0, 0);
@@ -444,7 +444,7 @@ describe('dead letter queue', () => {
     );
 
     await new Promise<void>(resolve => {
-      queue.on('deadLettered', () => resolve());
+      worker.on('deadLettered', () => resolve());
     });
     await worker.close();
 
@@ -486,7 +486,7 @@ describe('dead letter queue', () => {
     const original = await queue.add('test-job', {}, { attempts: 1 });
 
     await new Promise<void>(resolve => {
-      queue.on('deadLettered', () => resolve());
+      worker.on('deadLettered', () => resolve());
     });
     await worker.close();
 
@@ -525,7 +525,7 @@ describe('dead letter queue', () => {
 
     await new Promise<void>(resolve => {
       let count = 0;
-      queue.on('deadLettered', () => {
+      worker.on('deadLettered', () => {
         count++;
         if (count === 3) {
           resolve();
@@ -564,7 +564,7 @@ describe('dead letter queue', () => {
 
     await new Promise<void>(resolve => {
       let count = 0;
-      queue.on('deadLettered', () => {
+      worker.on('deadLettered', () => {
         count++;
         if (count === 3) {
           resolve();
@@ -608,7 +608,7 @@ describe('dead letter queue', () => {
 
     await new Promise<void>(resolve => {
       let count = 0;
-      queue.on('deadLettered', () => {
+      worker.on('deadLettered', () => {
         count++;
         if (count === 3) {
           resolve();
@@ -647,7 +647,7 @@ describe('dead letter queue', () => {
 
     await new Promise<void>(resolve => {
       let count = 0;
-      queue.on('deadLettered', () => {
+      worker.on('deadLettered', () => {
         count++;
         if (count === 5) {
           resolve();
@@ -683,7 +683,7 @@ describe('dead letter queue', () => {
 
     await new Promise<void>(resolve => {
       let count = 0;
-      queue.on('deadLettered', () => {
+      worker.on('deadLettered', () => {
         count++;
         if (count === 3) {
           resolve();
@@ -735,8 +735,6 @@ describe('dead letter queue', () => {
     await queue.add('job', {}, { attempts: 1 });
     await queue2.add('job', {}, { attempts: 1 });
 
-    const q1Events = new Queue(queueName, { connection, prefix });
-    const q2Events = new Queue(queue2Name, { connection, prefix });
     let deadLetteredCount = 0;
     await new Promise<void>(resolve => {
       const handler = () => {
@@ -745,8 +743,8 @@ describe('dead letter queue', () => {
           resolve();
         }
       };
-      q1Events.on('deadLettered', handler);
-      q2Events.on('deadLettered', handler);
+      worker1.on('deadLettered', handler);
+      worker2.on('deadLettered', handler);
     });
 
     await worker1.close();
@@ -764,8 +762,6 @@ describe('dead letter queue', () => {
     expect(q2Waiting).toBe(1);
 
     await queue2.close();
-    await q1Events.close();
-    await q2Events.close();
     await removeAllQueueData(new IORedis(redisHost), queue2Name);
   });
 
