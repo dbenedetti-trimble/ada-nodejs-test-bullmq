@@ -9,7 +9,7 @@ export interface GroupOptions {
 
 export interface GroupNode {
   groupId: string;
-  jobs: { id?: string; name: string; queueName: string }[];
+  jobs: any[];
 }
 
 export interface GroupMetadata {

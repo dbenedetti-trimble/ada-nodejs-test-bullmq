@@ -1260,9 +1260,15 @@ will never work with more accuracy than 1ms. */
       const compensationJobDefs: any[] = [];
       for (let idx = 0; idx < completedJobKeys.length; idx++) {
         const jobKey = completedJobKeys[idx];
-        const parts = jobKey.split(':');
-        const jobQueueName = parts.length >= 2 ? parts[1] : this.name;
-        const jobId = parts.length >= 3 ? parts[2] : jobKey;
+        const prefixWithColon = `${prefix}:`;
+        const withoutPrefix = jobKey.startsWith(prefixWithColon)
+          ? jobKey.slice(prefixWithColon.length)
+          : jobKey;
+        const lastColon = withoutPrefix.lastIndexOf(':');
+        const jobQueueName =
+          lastColon > 0 ? withoutPrefix.slice(0, lastColon) : this.name;
+        const jobId =
+          lastColon > 0 ? withoutPrefix.slice(lastColon + 1) : jobKey;
 
         const [err, fields] = pipelineResults[idx];
         if (err) {
@@ -1337,9 +1343,15 @@ will never work with more accuracy than 1ms. */
     } else {
       const compensationJobDefs: any[] = [];
       for (const jobKey of completedJobKeys) {
-        const parts = jobKey.split(':');
-        const jobQueueName = parts.length >= 2 ? parts[1] : this.name;
-        const jobId = parts.length >= 3 ? parts[2] : jobKey;
+        const prefixWithColon = `${prefix}:`;
+        const withoutPrefix = jobKey.startsWith(prefixWithColon)
+          ? jobKey.slice(prefixWithColon.length)
+          : jobKey;
+        const lastColon = withoutPrefix.lastIndexOf(':');
+        const jobQueueName =
+          lastColon > 0 ? withoutPrefix.slice(0, lastColon) : this.name;
+        const jobId =
+          lastColon > 0 ? withoutPrefix.slice(lastColon + 1) : jobKey;
 
         const [returnValueRaw, jobNameRaw] = await client.hmget(
           jobKey,

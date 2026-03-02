@@ -548,11 +548,17 @@ export class Queue<
       return [];
     }
 
+    const prefix = this.opts.prefix || 'bull';
     const jobs: GroupJobInfo[] = [];
     for (const [jobKey, status] of Object.entries(rawData)) {
-      const parts = jobKey.split(':');
-      const jobId = parts.length >= 3 ? parts[2] : jobKey;
-      const queueName = parts.length >= 2 ? parts[1] : this.name;
+      const prefixWithColon = `${prefix}:`;
+      const withoutPrefix = jobKey.startsWith(prefixWithColon)
+        ? jobKey.slice(prefixWithColon.length)
+        : jobKey;
+      const lastColon = withoutPrefix.lastIndexOf(':');
+      const jobId = lastColon > 0 ? withoutPrefix.slice(lastColon + 1) : jobKey;
+      const queueName =
+        lastColon > 0 ? withoutPrefix.slice(0, lastColon) : this.name;
 
       jobs.push({
         jobId,
@@ -615,12 +621,34 @@ export class Queue<
       const groupJobs = await this.getGroupJobs(groupId);
       const completedJobs = groupJobs.filter(j => j.status === 'completed');
 
+      const prefix = this.opts.prefix || 'bull';
       const compensationJobDefs: any[] = [];
-      for (const job of completedJobs) {
-        const jobNameRaw = await client.hget(job.jobKey, 'name');
-        const compDef = compensation[jobNameRaw || ''];
-        if (compDef) {
-          const returnValueRaw = await client.hget(job.jobKey, 'returnvalue');
+      const pipeline = (client as any).pipeline
+        ? (client as any).pipeline()
+        : null;
+
+      if (pipeline) {
+        for (const job of completedJobs) {
+          pipeline.hmget(job.jobKey, 'name', 'returnvalue');
+        }
+        const pipelineResults = await pipeline.exec();
+
+        for (let idx = 0; idx < completedJobs.length; idx++) {
+          const job = completedJobs[idx];
+          const [err, fields] = pipelineResults[idx];
+          if (err) {
+            continue;
+          }
+          const [jobNameRaw, returnValueRaw] = fields as [
+            string | null,
+            string | null,
+          ];
+
+          const compDef = compensation[jobNameRaw || ''];
+          if (!compDef) {
+            continue;
+          }
+
           let originalReturnValue = null;
           try {
             originalReturnValue = returnValueRaw
@@ -631,7 +659,6 @@ export class Queue<
           }
 
           const compQueueName = `${job.queueName}-compensation`;
-          const prefix = this.opts.prefix || 'bull';
           const compQueueBase = `${prefix}:${compQueueName}`;
 
           compensationJobDefs.push({
@@ -642,6 +669,50 @@ export class Queue<
               originalJobName: jobNameRaw,
               originalJobId: job.jobId,
               originalReturnValue,
+              originalQueueName: job.queueName,
+              compensationData: compDef.data || {},
+            },
+            opts: compDef.opts || {
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 1000 },
+            },
+            queueBase: compQueueBase,
+            timestamp: Date.now().toString(),
+          });
+        }
+      } else {
+        for (const job of completedJobs) {
+          const [jobNameRaw, returnValueRaw] = await client.hmget(
+            job.jobKey,
+            'name',
+            'returnvalue',
+          );
+          const compDef = compensation[jobNameRaw || ''];
+          if (!compDef) {
+            continue;
+          }
+
+          let originalReturnValue = null;
+          try {
+            originalReturnValue = returnValueRaw
+              ? JSON.parse(returnValueRaw)
+              : null;
+          } catch {
+            originalReturnValue = returnValueRaw;
+          }
+
+          const compQueueName = `${job.queueName}-compensation`;
+          const compQueueBase = `${prefix}:${compQueueName}`;
+
+          compensationJobDefs.push({
+            id: v4(),
+            name: compDef.name,
+            data: {
+              groupId,
+              originalJobName: jobNameRaw,
+              originalJobId: job.jobId,
+              originalReturnValue,
+              originalQueueName: job.queueName,
               compensationData: compDef.data || {},
             },
             opts: compDef.opts || {
@@ -655,7 +726,6 @@ export class Queue<
       }
 
       if (compensationJobDefs.length > 0) {
-        const prefix = this.opts.prefix || 'bull';
         const firstJob = completedJobs[0];
         const compQueueName = `${firstJob.queueName}-compensation`;
         const compWaitKey = `${prefix}:${compQueueName}:wait`;

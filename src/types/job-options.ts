@@ -111,5 +111,5 @@ export type RedisJobOptions = BaseJobOptions & {
   /**
    * Group membership (saga transaction group).
    */
-  gid?: string;
+  group?: { id: string; name: string };
 };

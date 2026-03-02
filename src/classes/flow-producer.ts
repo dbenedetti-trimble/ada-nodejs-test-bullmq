@@ -577,9 +577,7 @@ export class FlowProducer extends EventEmitter {
 
     for (const jobDef of opts.jobs) {
       if (jobDef.opts && (jobDef.opts as any).parent) {
-        throw new Error(
-          'A job cannot belong to both a group and a flow',
-        );
+        throw new Error('A job cannot belong to both a group and a flow');
       }
     }
 
@@ -600,7 +598,7 @@ export class FlowProducer extends EventEmitter {
     const groupId = v4();
     const compensationJson = JSON.stringify(opts.compensation || {});
 
-    const createdJobs: { id?: string; name: string; queueName: string }[] = [];
+    const createdJobs: any[] = [];
     const jobKeys: string[] = [];
 
     for (const jobDef of opts.jobs) {
@@ -625,11 +623,7 @@ export class FlowProducer extends EventEmitter {
       const jobKey = `${prefix}:${jobDef.queueName}:${jobId}`;
       jobKeys.push(jobKey);
 
-      createdJobs.push({
-        id: jobId,
-        name: jobDef.name,
-        queueName: jobDef.queueName,
-      });
+      createdJobs.push(job);
     }
 
     const anchorQueue = this.queueFromNode(
