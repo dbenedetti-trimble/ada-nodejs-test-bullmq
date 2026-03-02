@@ -1870,10 +1870,12 @@ export class Scripts {
       originalOpts: job.opts,
     };
 
-    const dlqData = JSON.stringify({
-      ...(job.data as object),
-      _dlqMeta: dlqMeta,
-    });
+    const isObjectData = typeof job.data === 'object' && job.data !== null;
+    const dlqData = JSON.stringify(
+      isObjectData
+        ? { ...(job.data as object), _dlqMeta: dlqMeta }
+        : { _originalData: job.data, _dlqMeta: dlqMeta },
+    );
     const optsJson = JSON.stringify(job.opts);
 
     const workerOpts = this.queue.opts as WorkerOptions;

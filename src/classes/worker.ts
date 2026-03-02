@@ -1162,6 +1162,21 @@ will never work with more accuracy than 1ms. */
 
       this.emit('failed', job, err, 'active');
 
+      if (this.opts.deadLetterQueue?.queueName && !Array.isArray(result)) {
+        const isTerminal =
+          err instanceof UnrecoverableError ||
+          err.name === 'UnrecoverableError' ||
+          job.attemptsMade >= (job.opts.attempts || 1);
+        if (isTerminal) {
+          this.emit(
+            'deadLettered',
+            job,
+            this.opts.deadLetterQueue.queueName,
+            err.message,
+          );
+        }
+      }
+
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,
       });

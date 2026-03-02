@@ -89,6 +89,18 @@ export interface QueueListener<
    * This event is triggered when the queue creates a new job.
    */
   waiting: (job: JobBase) => void;
+
+  /**
+   * Listen to 'deadLettered' event.
+   *
+   * This event is triggered when a job is moved to the dead letter queue
+   * after terminal failure (retries exhausted or UnrecoverableError).
+   */
+  deadLettered: (
+    job: JobBase,
+    deadLetterQueue: string,
+    failedReason: string,
+  ) => void;
 }
 
 /**
@@ -1075,7 +1087,7 @@ export class Queue<
    * @param start - Zero-based start index
    * @param end - Zero-based end index (inclusive)
    */
-  async getDeadLetterJobs(start: number, end: number): Promise<Job[]> {
+  async getDeadLetterJobs(start = 0, end = -1): Promise<Job[]> {
     return this.getJobs(['waiting'], start, end, false) as Promise<Job[]>;
   }
 
@@ -1108,7 +1120,9 @@ export class Queue<
       throw new Error(`Job ${jobId} is missing _dlqMeta.sourceQueue`);
     }
 
-    const { _dlqMeta, ...originalData } = dlqJob.data as any;
+    const { _dlqMeta, _originalData, ...spreadData } = dlqJob.data as any;
+    const originalData =
+      _originalData !== undefined ? _originalData : spreadData;
 
     return this.scripts.replayFromDeadLetter(
       jobId,

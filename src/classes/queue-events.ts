@@ -159,6 +159,23 @@ export interface QueueEventsListener extends IoredisListener {
   ) => void;
 
   /**
+   * Listen to 'deadLettered' event.
+   *
+   * This event is triggered when a job is moved to the dead letter queue
+   * after terminal failure (retries exhausted or UnrecoverableError).
+   *
+   * @param args - An object containing details about the dead-lettered job.
+   *  - `jobId` - The unique identifier of the original job in the source queue.
+   *  - `dlqJobId` - The unique identifier of the new job in the DLQ queue.
+   *  - `deadLetterQueue` - The name of the dead letter queue.
+   * @param id - The identifier of the event.
+   */
+  deadLettered: (
+    args: { jobId: string; dlqJobId: string; deadLetterQueue: string },
+    id: string,
+  ) => void;
+
+  /**
    * Listen to 'paused' event.
    *
    * This event is triggered when the queue is paused, halting the processing of new jobs.

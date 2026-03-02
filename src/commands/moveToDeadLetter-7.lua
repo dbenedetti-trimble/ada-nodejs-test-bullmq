@@ -3,6 +3,11 @@
   Called from the terminal failure path when deadLetterQueue is configured.
   Releases the job lock, emits backward-compat 'failed' event and 'deadLettered' event.
 
+  Note: In Redis Cluster mode, the source queue and DLQ queue must use the same hash tag
+  (e.g., {myapp}:orders and {myapp}:orders-dlq) for this cross-queue operation to be atomic.
+  If the queues hash to different cluster slots, this script will fail in cluster mode.
+  In standalone Redis mode, cross-queue key access works without restriction.
+
   Input:
     KEYS[1]  source active key
     KEYS[2]  source job hash key
