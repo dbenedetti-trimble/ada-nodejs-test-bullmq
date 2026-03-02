@@ -29,31 +29,28 @@ for i = 1, #allJobs, 2 do
   local jobKey = allJobs[i]
   local status = allJobs[i + 1]
 
-  if status == "pending" or status == "active" then
-    -- Only cancel pending jobs; active jobs are allowed to finish
-    if status == "pending" then
-      redis.call("HSET", groupJobsKey, jobKey, "cancelled")
+  if status == "pending" then
+    redis.call("HSET", groupJobsKey, jobKey, "cancelled")
 
-      -- Try to remove from wait list, delayed set, and prioritized set
-      -- jobKey format is {prefix}:{queueName}:{jobId}
-      local parts = {}
-      for part in jobKey:gmatch("[^:]+") do
-        table.insert(parts, part)
-      end
-      if #parts >= 3 then
-        local queuePrefix = parts[1]
-        local queueName = parts[2]
-        local jobId = parts[3]
-        local queueBase = queuePrefix .. ":" .. queueName
-
-        redis.call("LREM", queueBase .. ":wait", 0, jobId)
-        redis.call("LREM", queueBase .. ":paused", 0, jobId)
-        redis.call("ZREM", queueBase .. ":delayed", jobId)
-        redis.call("ZREM", queueBase .. ":prioritized", jobId)
-      end
-
-      cancelledCount = cancelledCount + 1
+    -- Try to remove from wait list, delayed set, and prioritized set
+    -- jobKey format is {prefix}:{queueName}:{jobId}
+    local parts = {}
+    for part in jobKey:gmatch("[^:]+") do
+      table.insert(parts, part)
     end
+    if #parts >= 3 then
+      local queuePrefix = parts[1]
+      local queueName = parts[2]
+      local jobId = parts[3]
+      local queueBase = queuePrefix .. ":" .. queueName
+
+      redis.call("LREM", queueBase .. ":wait", 0, jobId)
+      redis.call("LREM", queueBase .. ":paused", 0, jobId)
+      redis.call("ZREM", queueBase .. ":delayed", jobId)
+      redis.call("ZREM", queueBase .. ":prioritized", jobId)
+    end
+
+    cancelledCount = cancelledCount + 1
   end
 end
 

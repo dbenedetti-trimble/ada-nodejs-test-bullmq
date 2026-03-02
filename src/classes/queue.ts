@@ -579,6 +579,12 @@ export class Queue<
       throw new GroupNotFoundError(groupId);
     }
 
+    if (groupState.state === 'PENDING') {
+      throw new InvalidGroupStateError(
+        'Cannot cancel a group that is still being created',
+      );
+    }
+
     if (groupState.state === 'COMPLETED') {
       throw new InvalidGroupStateError('Cannot cancel a completed group');
     }

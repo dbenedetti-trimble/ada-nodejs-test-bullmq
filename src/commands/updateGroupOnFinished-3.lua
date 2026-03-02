@@ -13,6 +13,7 @@
     ARGV[4] return value (if completed, empty string otherwise)
     ARGV[5] group name
     ARGV[6] group ID
+    ARGV[7] failure reason (if failed, empty string otherwise)
 
   Output:
     0         - no state transition (group still ACTIVE)
@@ -77,9 +78,24 @@ elseif newStatus == "failed" then
   local completedCount = tonumber(redis.call("HGET", groupHashKey, "completedCount"))
   if completedCount > 0 then
     redis.call("HSET", groupHashKey, "state", "COMPENSATING", "updatedAt", timestamp)
+
+    redis.call("XADD", eventStreamKey, "*",
+      "event", "group:compensating",
+      "groupId", ARGV[6] or "",
+      "groupName", groupName,
+      "failedJobId", jobKey,
+      "reason", ARGV[7] or "")
+
     return 2
   else
     redis.call("HSET", groupHashKey, "state", "FAILED", "updatedAt", timestamp)
+
+    redis.call("XADD", eventStreamKey, "*",
+      "event", "group:failed",
+      "groupId", ARGV[6] or "",
+      "groupName", groupName,
+      "state", "FAILED")
+
     return 3
   end
 end

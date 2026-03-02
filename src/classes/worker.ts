@@ -1188,6 +1188,7 @@ will never work with more accuracy than 1ms. */
         status,
         groupOpts.name,
         status === 'completed' ? JSON.stringify(returnValue ?? null) : '',
+        failedReason || '',
       );
 
       if (result === 2) {
@@ -1201,19 +1202,6 @@ will never work with more accuracy than 1ms. */
         );
       } else if (result === 3) {
         await this.scripts.cancelGroupJobsCommand(client, groupOpts.id);
-        const queueKeys = this.keys;
-        await client.xadd(
-          queueKeys.events,
-          '*',
-          'event',
-          'group:failed',
-          'groupId',
-          groupOpts.id,
-          'groupName',
-          groupOpts.name,
-          'state',
-          'FAILED',
-        );
       }
     } catch (err) {
       this.emit('error', err as Error);
@@ -1238,7 +1226,13 @@ will never work with more accuracy than 1ms. */
     let compensation: Record<string, any>;
     try {
       compensation = JSON.parse(compensationRaw);
-    } catch {
+    } catch (err) {
+      this.emit(
+        'error',
+        new Error(
+          `Failed to parse compensation mapping for group ${groupId}: ${(err as Error).message}`,
+        ),
+      );
       return;
     }
 
@@ -1253,91 +1247,168 @@ will never work with more accuracy than 1ms. */
       return;
     }
 
-    const compensationJobDefs: any[] = [];
-    for (const jobKey of completedJobKeys) {
-      const parts = jobKey.split(':');
-      const jobQueueName = parts.length >= 2 ? parts[1] : this.name;
-      const jobId = parts.length >= 3 ? parts[2] : jobKey;
-      const jobDataKey = jobKey;
+    const pipeline = (client as any).pipeline
+      ? (client as any).pipeline()
+      : null;
 
-      const returnValueRaw = await client.hget(jobDataKey, 'returnvalue');
-      let originalReturnValue = null;
-      try {
-        originalReturnValue = returnValueRaw
-          ? JSON.parse(returnValueRaw)
-          : null;
-      } catch {
-        originalReturnValue = returnValueRaw;
+    if (pipeline) {
+      for (const jobKey of completedJobKeys) {
+        pipeline.hmget(jobKey, 'returnvalue', 'name');
+      }
+      const pipelineResults = await pipeline.exec();
+
+      const compensationJobDefs: any[] = [];
+      for (let idx = 0; idx < completedJobKeys.length; idx++) {
+        const jobKey = completedJobKeys[idx];
+        const parts = jobKey.split(':');
+        const jobQueueName = parts.length >= 2 ? parts[1] : this.name;
+        const jobId = parts.length >= 3 ? parts[2] : jobKey;
+
+        const [err, fields] = pipelineResults[idx];
+        if (err) {
+          continue;
+        }
+        const [returnValueRaw, jobNameRaw] = fields as [
+          string | null,
+          string | null,
+        ];
+
+        let originalReturnValue = null;
+        try {
+          originalReturnValue = returnValueRaw
+            ? JSON.parse(returnValueRaw)
+            : null;
+        } catch {
+          originalReturnValue = returnValueRaw;
+        }
+
+        const compDef = compensation[jobNameRaw || ''];
+        if (!compDef) {
+          continue;
+        }
+
+        const compQueueName = `${jobQueueName}-compensation`;
+        const compQueueBase = `${prefix}:${compQueueName}`;
+
+        compensationJobDefs.push({
+          id: `comp-${v4()}`,
+          name: compDef.name,
+          data: {
+            groupId,
+            originalJobName: jobNameRaw,
+            originalJobId: jobId,
+            originalReturnValue,
+            originalQueueName: jobQueueName,
+            compensationData: compDef.data || {},
+          },
+          opts: compDef.opts || {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 1000 },
+          },
+          queueBase: compQueueBase,
+          timestamp: Date.now().toString(),
+        });
       }
 
-      const jobNameRaw = await client.hget(jobDataKey, 'name');
+      if (compensationJobDefs.length > 0) {
+        const firstCompJobDef = compensationJobDefs[0];
+        const compWaitKey = `${firstCompJobDef.queueBase}:wait`;
+        const compMetaKey = `${firstCompJobDef.queueBase}:meta`;
+        const compEventsKey = `${firstCompJobDef.queueBase}:events`;
 
-      const compDef = compensation[jobNameRaw || ''];
-      if (!compDef) {
-        continue;
+        await this.scripts.triggerCompensationCommand(
+          client,
+          compWaitKey,
+          compMetaKey,
+          compEventsKey,
+          JSON.stringify(compensationJobDefs),
+        );
+
+        await client.hset(
+          groupHashKey,
+          'totalCompJobs',
+          compensationJobDefs.length.toString(),
+          'compSuccessCount',
+          '0',
+          'compFailureCount',
+          '0',
+        );
+      }
+    } else {
+      const compensationJobDefs: any[] = [];
+      for (const jobKey of completedJobKeys) {
+        const parts = jobKey.split(':');
+        const jobQueueName = parts.length >= 2 ? parts[1] : this.name;
+        const jobId = parts.length >= 3 ? parts[2] : jobKey;
+
+        const [returnValueRaw, jobNameRaw] = await client.hmget(
+          jobKey,
+          'returnvalue',
+          'name',
+        );
+
+        let originalReturnValue = null;
+        try {
+          originalReturnValue = returnValueRaw
+            ? JSON.parse(returnValueRaw)
+            : null;
+        } catch {
+          originalReturnValue = returnValueRaw;
+        }
+
+        const compDef = compensation[jobNameRaw || ''];
+        if (!compDef) {
+          continue;
+        }
+
+        const compQueueName = `${jobQueueName}-compensation`;
+        const compQueueBase = `${prefix}:${compQueueName}`;
+
+        compensationJobDefs.push({
+          id: `comp-${v4()}`,
+          name: compDef.name,
+          data: {
+            groupId,
+            originalJobName: jobNameRaw,
+            originalJobId: jobId,
+            originalReturnValue,
+            originalQueueName: jobQueueName,
+            compensationData: compDef.data || {},
+          },
+          opts: compDef.opts || {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 1000 },
+          },
+          queueBase: compQueueBase,
+          timestamp: Date.now().toString(),
+        });
       }
 
-      const compQueueName = `${jobQueueName}-compensation`;
-      const compQueueBase = `${prefix}:${compQueueName}`;
+      if (compensationJobDefs.length > 0) {
+        const firstCompJobDef = compensationJobDefs[0];
+        const compWaitKey = `${firstCompJobDef.queueBase}:wait`;
+        const compMetaKey = `${firstCompJobDef.queueBase}:meta`;
+        const compEventsKey = `${firstCompJobDef.queueBase}:events`;
 
-      compensationJobDefs.push({
-        id: `comp-${v4()}`,
-        name: compDef.name,
-        data: {
-          groupId,
-          originalJobName: jobNameRaw,
-          originalJobId: jobId,
-          originalReturnValue,
-          compensationData: compDef.data || {},
-        },
-        opts: compDef.opts || {
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 1000 },
-        },
-        queueBase: compQueueBase,
-        timestamp: Date.now().toString(),
-      });
+        await this.scripts.triggerCompensationCommand(
+          client,
+          compWaitKey,
+          compMetaKey,
+          compEventsKey,
+          JSON.stringify(compensationJobDefs),
+        );
+
+        await client.hset(
+          groupHashKey,
+          'totalCompJobs',
+          compensationJobDefs.length.toString(),
+          'compSuccessCount',
+          '0',
+          'compFailureCount',
+          '0',
+        );
+      }
     }
-
-    if (compensationJobDefs.length > 0) {
-      const firstCompJobDef = compensationJobDefs[0];
-      const compWaitKey = `${firstCompJobDef.queueBase}:wait`;
-      const compMetaKey = `${firstCompJobDef.queueBase}:meta`;
-      const compEventsKey = `${firstCompJobDef.queueBase}:events`;
-
-      await this.scripts.triggerCompensationCommand(
-        client,
-        compWaitKey,
-        compMetaKey,
-        compEventsKey,
-        JSON.stringify(compensationJobDefs),
-      );
-
-      await client.hset(
-        groupHashKey,
-        'totalCompJobs',
-        compensationJobDefs.length.toString(),
-        'compSuccessCount',
-        '0',
-        'compFailureCount',
-        '0',
-      );
-    }
-
-    await client.xadd(
-      this.keys.events,
-      '*',
-      'event',
-      'group:compensating',
-      'groupId',
-      groupId,
-      'groupName',
-      groupName,
-      'failedJobId',
-      failedJobId,
-      'reason',
-      reason,
-    );
   }
 
   private async handleCompensationPostCompletion(
@@ -1355,9 +1426,8 @@ will never work with more accuracy than 1ms. */
       const prefix = this.opts.prefix || 'bull';
       const groupName = jobData.originalJobName || '';
 
-      const queueForGroup = jobData.originalJobId
-        ? this.name.replace(/-compensation$/, '')
-        : this.name;
+      const queueForGroup =
+        jobData.originalQueueName || this.name.replace(/-compensation$/, '');
       const groupHashKey = `${prefix}:${queueForGroup}:groups:${groupId}`;
       const eventStreamKey = `${prefix}:${queueForGroup}:events`;
 

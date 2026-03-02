@@ -1790,6 +1790,7 @@ export class Scripts {
     status: 'completed' | 'failed',
     groupName: string,
     returnValue?: string,
+    failedReason?: string,
   ): Promise<number> {
     const queueKeys = this.queue.keys;
     const groupHashKey = `${queueKeys.groups}:${groupId}`;
@@ -1804,13 +1805,10 @@ export class Scripts {
       returnValue || '',
       groupName,
       groupId,
+      failedReason || '',
     ];
 
-    return this.execCommand(
-      client,
-      'updateGroupOnFinished',
-      keys.concat(args),
-    );
+    return this.execCommand(client, 'updateGroupOnFinished', keys.concat(args));
   }
 
   async cancelGroupJobsCommand(
