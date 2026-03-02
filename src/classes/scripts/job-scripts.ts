@@ -9,11 +9,7 @@ import {
   RetryJobOpts,
   RetryOptions,
 } from '../../interfaces';
-import {
-  JobState,
-  RedisJobOptions,
-  JobProgress,
-} from '../../types';
+import { JobState, RedisJobOptions, JobProgress } from '../../types';
 import { isRedisVersionLowerThan, objectToFlatArray } from '../../utils';
 import { ScriptContext, pack, finishedErrors } from './script-utils';
 
@@ -217,10 +213,7 @@ export class JobScripts {
     return keys;
   }
 
-  private removeArgs(
-    jobId: string,
-    removeChildren: boolean,
-  ): (string | number)[] {
+  removeArgs(jobId: string, removeChildren: boolean): (string | number)[] {
     const keys: (string | number)[] = [jobId, 'repeat'].map(name =>
       this.ctx.toKey(name),
     );

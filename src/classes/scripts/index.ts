@@ -180,6 +180,13 @@ export class Scripts {
     return this.jobScripts.remove(jobId, removeChildren);
   }
 
+  protected removeArgs(
+    jobId: string,
+    removeChildren: boolean,
+  ): (string | number)[] {
+    return this.jobScripts.removeArgs(jobId, removeChildren);
+  }
+
   async removeUnprocessedChildren(jobId: string): Promise<void> {
     return this.jobScripts.removeUnprocessedChildren(jobId);
   }
@@ -392,10 +399,7 @@ export class Scripts {
     return this.flowScripts.getDependencyCountsArgs(jobId, types);
   }
 
-  async getDependencyCounts(
-    jobId: string,
-    types: string[],
-  ): Promise<number[]> {
+  async getDependencyCounts(jobId: string, types: string[]): Promise<number[]> {
     return this.flowScripts.getDependencyCounts(jobId, types);
   }
 

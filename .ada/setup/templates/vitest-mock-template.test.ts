@@ -67,7 +67,7 @@ describe('[FEATURE_NAME] - Mocking Patterns', () => {
       const processorSpy = sandbox.spy();
 
       let resolveProcessing: () => void;
-      const processing = new Promise<void>((resolve) => {
+      const processing = new Promise<void>(resolve => {
         resolveProcessing = resolve;
       });
 
@@ -96,13 +96,15 @@ describe('[FEATURE_NAME] - Mocking Patterns', () => {
       const processorSpy = sandbox.spy();
       let processedCount = 0;
 
-      const allProcessed = new Promise<void>((resolve) => {
+      const allProcessed = new Promise<void>(resolve => {
         const worker = new Worker(
           queueName,
           async (job: Job) => {
             processorSpy(job.data.index);
             processedCount++;
-            if (processedCount === 3) resolve();
+            if (processedCount === 3) {
+              resolve();
+            }
           },
           { connection, prefix },
         );
@@ -116,7 +118,7 @@ describe('[FEATURE_NAME] - Mocking Patterns', () => {
       await allProcessed;
 
       expect(processorSpy.callCount).toBe(3);
-      const calledWith = processorSpy.getCalls().map((c) => c.args[0]);
+      const calledWith = processorSpy.getCalls().map(c => c.args[0]);
       expect(calledWith).toContain(0);
       expect(calledWith).toContain(1);
       expect(calledWith).toContain(2);
@@ -136,7 +138,7 @@ describe('[FEATURE_NAME] - Mocking Patterns', () => {
         .resolves({ sent: true });
 
       let resolveProcessing: () => void;
-      const processing = new Promise<void>((resolve) => {
+      const processing = new Promise<void>(resolve => {
         resolveProcessing = resolve;
       });
 
@@ -169,18 +171,17 @@ describe('[FEATURE_NAME] - Mocking Patterns', () => {
       const queueEvents = new QueueEvents(queueName, { connection, prefix });
       await queueEvents.waitUntilReady();
 
-      const completed = new Promise<void>((resolve) => {
-        queueEvents.on('completed', (event) => {
+      const completed = new Promise<void>(resolve => {
+        queueEvents.on('completed', event => {
           onCompleted(event.jobId);
           resolve();
         });
       });
 
-      const worker = new Worker(
-        queueName,
-        async () => 'done',
-        { connection, prefix },
-      );
+      const worker = new Worker(queueName, async () => 'done', {
+        connection,
+        prefix,
+      });
       await worker.waitUntilReady();
 
       const job = await queue.add('test', { data: 'value' });
@@ -221,7 +222,7 @@ describe('[FEATURE_NAME] - Mocking Patterns', () => {
       const queueEvents = new QueueEvents(queueName, { connection, prefix });
       await queueEvents.waitUntilReady();
 
-      const completed = new Promise<void>((resolve) => {
+      const completed = new Promise<void>(resolve => {
         queueEvents.on('completed', () => resolve());
       });
 
