@@ -4,6 +4,8 @@ export * from './base-job-options';
 export * from './child-message';
 export * from './connection';
 export * from './flow-job';
+export * from './group-job';
+export * from './group-options';
 export * from './ioredis-events';
 export * from './job-json';
 export * from './job-scheduler-json';

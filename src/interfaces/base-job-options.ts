@@ -107,4 +107,14 @@ export interface BaseJobOptions extends DefaultJobOptions {
    * Internal property used by repeatable jobs.
    */
   prevMillis?: number;
+
+  /**
+   * Group membership for saga transaction groups.
+   * When set, this job is part of a transactional group
+   * managed by FlowProducer.addGroup().
+   */
+  group?: {
+    id: string;
+    name: string;
+  };
 }

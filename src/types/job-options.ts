@@ -107,4 +107,9 @@ export type RedisJobOptions = BaseJobOptions & {
    * Deduplication options.
    */
   de?: DeduplicationOptions;
+
+  /**
+   * Group membership (saga transaction group).
+   */
+  gid?: string;
 };

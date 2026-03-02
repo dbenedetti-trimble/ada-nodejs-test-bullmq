@@ -1756,6 +1756,64 @@ export class Scripts {
     }
   }
 
+  async createGroupCommand(
+    _client: RedisClient | ChainableCommander,
+    _groupId: string,
+    _groupName: string,
+    _totalJobs: number,
+    _compensationJson: string,
+    _jobKeys: string[],
+  ): Promise<number> {
+    // TODO: implement in features pass
+    return 0;
+  }
+
+  async updateGroupOnFinishedCommand(
+    _client: RedisClient | ChainableCommander,
+    _groupId: string,
+    _jobKey: string,
+    _status: 'completed' | 'failed',
+    _returnValue?: string,
+  ): Promise<any> {
+    // TODO: implement in features pass
+    return null;
+  }
+
+  async cancelGroupJobsCommand(
+    _client: RedisClient | ChainableCommander,
+    _groupId: string,
+  ): Promise<number> {
+    // TODO: implement in features pass
+    return 0;
+  }
+
+  async triggerCompensationCommand(
+    _client: RedisClient | ChainableCommander,
+    _compensationQueuePrefix: string,
+    _compensationJobs: string,
+  ): Promise<number> {
+    // TODO: implement in features pass
+    return 0;
+  }
+
+  async getGroupStateCommand(
+    _client: RedisClient | ChainableCommander,
+    _groupId: string,
+  ): Promise<string[]> {
+    // TODO: implement in features pass
+    return [];
+  }
+
+  async updateGroupCompensationCommand(
+    _client: RedisClient | ChainableCommander,
+    _groupId: string,
+    _compensationJobKey: string,
+    _result: 'success' | 'failure',
+  ): Promise<string | null> {
+    // TODO: implement in features pass
+    return null;
+  }
+
   finishedErrors({
     code,
     jobId,

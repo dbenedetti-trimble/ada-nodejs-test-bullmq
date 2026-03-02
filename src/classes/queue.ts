@@ -2,6 +2,8 @@ import { v4 } from 'uuid';
 import {
   BaseJobOptions,
   BulkJobOptions,
+  GroupMetadata,
+  GroupJobInfo,
   IoredisListener,
   JobSchedulerJson,
   MinimalQueue,
@@ -506,6 +508,41 @@ export class Queue<
 
       this.emit('paused');
     });
+  }
+
+  /**
+   * Get the metadata of a job group by its ID.
+   *
+   * @param groupId - The unique identifier of the group.
+   * @returns The group metadata, or null if the group does not exist.
+   */
+  async getGroupState(_groupId: string): Promise<GroupMetadata | null> {
+    // TODO: implement in features pass
+    return null;
+  }
+
+  /**
+   * Get all jobs belonging to a group with their current statuses.
+   *
+   * @param groupId - The unique identifier of the group.
+   * @returns Array of job info objects with status within the group.
+   */
+  async getGroupJobs(_groupId: string): Promise<GroupJobInfo[]> {
+    // TODO: implement in features pass
+    return [];
+  }
+
+  /**
+   * Cancel an active group. Pending jobs are cancelled, and compensation
+   * is triggered for already-completed jobs that have compensation mappings.
+   *
+   * @param groupId - The unique identifier of the group to cancel.
+   * @throws GroupNotFoundError if the group does not exist.
+   * @throws InvalidGroupStateError if the group is not in a cancellable state.
+   */
+  async cancelGroup(_groupId: string): Promise<void> {
+    // TODO: implement in features pass
+    throw new Error('cancelGroup is not yet implemented');
   }
 
   /**

@@ -5,6 +5,8 @@ import {
   FlowJob,
   FlowQueuesOpts,
   FlowOpts,
+  GroupOptions,
+  GroupNode,
   IoredisListener,
   ParentOptions,
   QueueBaseOptions,
@@ -552,6 +554,20 @@ export class FlowProducer extends EventEmitter {
       databaseType: this.connection.databaseType,
       trace: async (): Promise<any> => {},
     };
+  }
+
+  /**
+   * Creates a transactional job group (saga pattern).
+   *
+   * Atomically creates a group of independent jobs that form a logical transaction.
+   * If any job fails after exhausting retries, completed siblings are compensated.
+   *
+   * @param opts - Group creation options including name, jobs, and optional compensation mappings.
+   * @returns A GroupNode containing the group ID and created Job instances.
+   */
+  async addGroup(_opts: GroupOptions): Promise<GroupNode> {
+    // TODO: implement in features pass — validation, atomic pipeline, group creation
+    throw new Error('addGroup is not yet implemented');
   }
 
   /**

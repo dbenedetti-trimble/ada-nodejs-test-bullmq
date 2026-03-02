@@ -25,6 +25,7 @@ export class QueueKeys {
       'pc', // priority counter key
       'marker', // marker key
       'de', // deduplication key
+      'groups', // saga transaction groups index
     ].forEach(key => {
       keys[key] = this.toKey(name, key);
     });

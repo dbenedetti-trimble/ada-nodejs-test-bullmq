@@ -6,6 +6,7 @@ export * from './child-processor';
 export * from './errors';
 export * from './flow-producer';
 export * from './job';
+export * from './job-group';
 export * from './job-scheduler';
 // export * from './main'; this file must not be exported
 // export * from './main-worker'; this file must not be exported
