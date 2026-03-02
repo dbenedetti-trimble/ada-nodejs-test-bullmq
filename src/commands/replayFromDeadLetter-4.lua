@@ -66,7 +66,11 @@ rcall("HMSET", newJobKey,
   "attemptsMade", 0,
   "atm", 0)
 
-rcall("RPUSH", srcWaitKey, newJobId)
+local pushCmd = "LPUSH"
+if originalOpts["lifo"] then
+  pushCmd = "RPUSH"
+end
+rcall(pushCmd, srcWaitKey, newJobId)
 
 local srcEventsKey = srcPrefix .. "events"
 rcall("XADD", srcEventsKey, "*",
@@ -75,5 +79,6 @@ rcall("XADD", srcEventsKey, "*",
 
 rcall("LREM", dlqWaitKey, 1, dlqJobId)
 rcall("DEL", dlqJobKey)
+rcall("DEL", dlqJobKey .. ":logs")
 
 return tostring(newJobId)
