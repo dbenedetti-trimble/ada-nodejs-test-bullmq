@@ -38,6 +38,13 @@ export interface DefaultJobOptions {
   backoff?: number | BackoffOptions;
 
   /**
+   * Per-error-type backoff configuration. Maps error.name to a specific
+   * BackoffOptions that overrides the default backoff when a matching
+   * error is thrown.
+   */
+  errorBackoffs?: Record<string, BackoffOptions>;
+
+  /**
    * If true, adds the job to the right of the queue instead of the left (default false)
    *
    * @see {@link https://docs.bullmq.io/guide/jobs/lifo}

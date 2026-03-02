@@ -1,4 +1,5 @@
 import { AdvancedOptions } from './advanced-options';
+import { CircuitBreakerOptions } from './circuit-breaker-options';
 import { QueueBaseOptions } from './queue-options';
 import { RateLimiterOptions } from './rate-limiter-options';
 import { MetricsOptions } from './metrics-options';
@@ -157,6 +158,12 @@ export interface WorkerOptions extends QueueBaseOptions, SandboxedOptions {
    * Telemetry Addon
    */
   telemetry?: Telemetry;
+
+  /**
+   * Circuit breaker configuration. When configured, the worker will stop
+   * fetching new jobs after consecutive failures reach the threshold.
+   */
+  circuitBreaker?: CircuitBreakerOptions;
 }
 
 export interface GetNextJobOptions {
