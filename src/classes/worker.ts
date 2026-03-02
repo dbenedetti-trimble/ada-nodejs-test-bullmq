@@ -88,6 +88,18 @@ export interface WorkerListener<
   ) => void;
 
   /**
+   * Listen to 'deadLettered' event.
+   *
+   * This event is triggered when a job is moved to a dead letter queue
+   * after terminal failure (retries exhausted or UnrecoverableError).
+   */
+  deadLettered: (
+    job: Job<DataType, ResultType, NameType>,
+    deadLetterQueue: string,
+    failedReason: string,
+  ) => void;
+
+  /**
    * Listen to 'drained' event.
    *
    * This event is triggered when the queue has drained the waiting list.
@@ -263,6 +275,16 @@ export class Worker<
 
     if (typeof this.opts.drainDelay !== 'number' || this.opts.drainDelay <= 0) {
       throw new Error('drainDelay must be greater than 0');
+    }
+
+    if (
+      this.opts.deadLetterQueue &&
+      (typeof this.opts.deadLetterQueue.queueName !== 'string' ||
+        !this.opts.deadLetterQueue.queueName.trim())
+    ) {
+      throw new Error(
+        'deadLetterQueue.queueName must be a non-empty string',
+      );
     }
 
     this.concurrency = this.opts.concurrency;

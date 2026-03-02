@@ -1,4 +1,5 @@
 import { AdvancedOptions } from './advanced-options';
+import { DeadLetterQueueOptions } from './dead-letter-options';
 import { QueueBaseOptions } from './queue-options';
 import { RateLimiterOptions } from './rate-limiter-options';
 import { MetricsOptions } from './metrics-options';
@@ -157,6 +158,13 @@ export interface WorkerOptions extends QueueBaseOptions, SandboxedOptions {
    * Telemetry Addon
    */
   telemetry?: Telemetry;
+
+  /**
+   * Configure a dead letter queue for terminally failed jobs.
+   * When set, jobs that exhaust all retries or throw UnrecoverableError
+   * are moved to the specified DLQ queue instead of the failed set.
+   */
+  deadLetterQueue?: DeadLetterQueueOptions;
 }
 
 export interface GetNextJobOptions {
