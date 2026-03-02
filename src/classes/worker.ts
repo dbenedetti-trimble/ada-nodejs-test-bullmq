@@ -1299,7 +1299,7 @@ will never work with more accuracy than 1ms. */
     switch (transition.state) {
       case CircuitBreakerState.OPEN:
         this.emit('circuit:open', {
-          failures: this.opts.circuitBreaker!.threshold,
+          failures: transition.failures ?? this.opts.circuitBreaker!.threshold,
           threshold: this.opts.circuitBreaker!.threshold,
         });
         break;

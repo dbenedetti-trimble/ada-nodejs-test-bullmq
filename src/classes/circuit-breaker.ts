@@ -4,6 +4,7 @@ import { CircuitBreakerState } from '../enums/circuit-breaker-state';
 export interface CircuitBreakerTransition {
   state: CircuitBreakerState;
   previousState: CircuitBreakerState;
+  failures?: number;
 }
 
 export class CircuitBreaker {
@@ -131,7 +132,11 @@ export class CircuitBreaker {
   ): CircuitBreakerTransition {
     this.state = CircuitBreakerState.OPEN;
     this.startDurationTimer();
-    return { state: CircuitBreakerState.OPEN, previousState };
+    return {
+      state: CircuitBreakerState.OPEN,
+      previousState,
+      failures: this.failureCount,
+    };
   }
 
   private startDurationTimer(): void {
