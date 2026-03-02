@@ -1181,7 +1181,7 @@ will never work with more accuracy than 1ms. */
           duration: processedOn ? Date.now() - processedOn : undefined,
           data: {
             failedReason: err.message,
-            stacktrace: err.stack,
+            stacktrace: JSON.stringify(job.stacktrace),
           },
         });
       }
