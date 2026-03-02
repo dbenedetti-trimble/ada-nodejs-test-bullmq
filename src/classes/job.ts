@@ -832,8 +832,29 @@ export class Job<
           tm,
         };
 
+        const queueLogger = this.queue.opts?.logger;
+        const queueLogEvents = this.queue.opts?.logEvents;
+
         let finishedOn: number;
         if (shouldRetry) {
+          if (
+            queueLogger &&
+            (!queueLogEvents || queueLogEvents.includes('job:retrying'))
+          ) {
+            queueLogger.warn({
+              timestamp: Date.now(),
+              event: 'job:retrying',
+              queue: this.queueName,
+              jobId: this.id,
+              jobName: this.name,
+              attemptsMade: this.attemptsMade + 1,
+              data: {
+                delay: retryDelay,
+                maxAttempts: this.opts.attempts,
+              },
+            });
+          }
+
           if (retryDelay) {
             // Retry with delay
             result = await this.scripts.moveToDelayed(
@@ -843,6 +864,20 @@ export class Job<
               token,
               { fieldsToUpdate },
             );
+
+            if (
+              queueLogger &&
+              (!queueLogEvents || queueLogEvents.includes('job:delayed'))
+            ) {
+              queueLogger.debug({
+                timestamp: Date.now(),
+                event: 'job:delayed',
+                queue: this.queueName,
+                jobId: this.id,
+                jobName: this.name,
+                data: { delay: retryDelay },
+              });
+            }
 
             this.recordJobMetrics('delayed');
           } else {
@@ -1422,6 +1457,22 @@ export class Job<
       { skipAttempt: true },
     );
     this.delay = finalDelay;
+
+    const queueLogger = this.queue.opts?.logger;
+    const queueLogEvents = this.queue.opts?.logEvents;
+    if (
+      queueLogger &&
+      (!queueLogEvents || queueLogEvents.includes('job:delayed'))
+    ) {
+      queueLogger.debug({
+        timestamp: Date.now(),
+        event: 'job:delayed',
+        queue: this.queueName,
+        jobId: this.id,
+        jobName: this.name,
+        data: { delay: finalDelay },
+      });
+    }
 
     this.recordJobMetrics('delayed');
 

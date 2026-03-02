@@ -1,5 +1,6 @@
 import { AdvancedRepeatOptions } from './advanced-options';
 import { DefaultJobOptions } from './base-job-options';
+import { LifecycleEvent, LifecycleLogger } from './lifecycle-logger';
 import { ConnectionOptions } from './redis-options';
 import { Telemetry } from './telemetry';
 
@@ -38,6 +39,20 @@ export interface QueueBaseOptions {
    * Telemetry client
    */
   telemetry?: Telemetry;
+
+  /**
+   * Lifecycle logger instance. When provided, structured log entries are
+   * emitted at key job lifecycle points (added, active, completed, failed, etc.).
+   * If not provided, no lifecycle logging occurs.
+   */
+  logger?: LifecycleLogger;
+
+  /**
+   * Optional array of lifecycle events to log. When provided alongside
+   * `logger`, only the listed events produce log calls. If omitted but
+   * `logger` is set, all lifecycle events are logged.
+   */
+  logEvents?: LifecycleEvent[];
 
   /**
    * Skip waiting for connection ready.
@@ -97,8 +112,10 @@ export interface RepeatBaseOptions extends QueueBaseOptions {
 /**
  * Options for QueueEvents
  */
-export interface QueueEventsOptions
-  extends Omit<QueueBaseOptions, 'telemetry'> {
+export interface QueueEventsOptions extends Omit<
+  QueueBaseOptions,
+  'telemetry'
+> {
   /**
    * Condition to start listening to events at instance creation.
    */
