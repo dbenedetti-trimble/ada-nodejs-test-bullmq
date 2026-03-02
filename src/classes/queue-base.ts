@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import {
+  LifecycleEvent,
   MinimalQueue,
   QueueBaseOptions,
   RedisClient,
@@ -190,6 +191,20 @@ export class QueueBase extends EventEmitter implements MinimalQueue {
         return;
       }
     }
+  }
+
+  get logger() {
+    return this.opts.logger;
+  }
+
+  shouldLog(event: LifecycleEvent): boolean {
+    if (!this.opts.logger) {
+      return false;
+    }
+    if (!this.opts.logEvents) {
+      return true;
+    }
+    return this.opts.logEvents.includes(event);
   }
 
   /**

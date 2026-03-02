@@ -834,6 +834,21 @@ export class Job<
 
         let finishedOn: number;
         if (shouldRetry) {
+          if (this.queue.shouldLog('job:retrying')) {
+            this.queue.logger!.warn({
+              timestamp: Date.now(),
+              event: 'job:retrying',
+              queue: this.queueName,
+              jobId: this.id,
+              jobName: this.name,
+              attemptsMade: this.attemptsMade + 1,
+              data: {
+                delay: retryDelay,
+                maxAttempts: this.opts.attempts,
+              },
+            });
+          }
+
           if (retryDelay) {
             // Retry with delay
             result = await this.scripts.moveToDelayed(
@@ -843,6 +858,17 @@ export class Job<
               token,
               { fieldsToUpdate },
             );
+
+            if (this.queue.shouldLog('job:delayed')) {
+              this.queue.logger!.debug({
+                timestamp: Date.now(),
+                event: 'job:delayed',
+                queue: this.queueName,
+                jobId: this.id,
+                jobName: this.name,
+                data: { delay: retryDelay },
+              });
+            }
 
             this.recordJobMetrics('delayed');
           } else {
@@ -1422,6 +1448,17 @@ export class Job<
       { skipAttempt: true },
     );
     this.delay = finalDelay;
+
+    if (this.queue.shouldLog('job:delayed')) {
+      this.queue.logger!.debug({
+        timestamp: Date.now(),
+        event: 'job:delayed',
+        queue: this.queueName,
+        jobId: this.id,
+        jobName: this.name,
+        data: { delay: finalDelay },
+      });
+    }
 
     this.recordJobMetrics('delayed');
 

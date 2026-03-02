@@ -551,6 +551,7 @@ export class FlowProducer extends EventEmitter {
       redisVersion: this.connection.redisVersion,
       databaseType: this.connection.databaseType,
       trace: async (): Promise<any> => {},
+      shouldLog: () => false,
     };
   }
 

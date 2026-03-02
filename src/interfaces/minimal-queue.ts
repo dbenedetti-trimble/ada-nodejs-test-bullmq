@@ -1,4 +1,5 @@
 import { RedisClient } from './connection';
+import { LifecycleEvent, LifecycleLogger } from './lifecycle-logger';
 import { Span } from './telemetry';
 import { SpanKind } from '../enums/telemetry-attributes';
 import { ScriptQueueContext } from './script-queue-context';
@@ -37,4 +38,16 @@ export interface MinimalQueue extends ScriptQueueContext {
     callback: (span?: Span, dstPropagationMetadata?: string) => Promise<T> | T,
     srcPropagationMetadata?: string,
   ): Promise<T | Promise<T>>;
+
+  /**
+   * User-provided lifecycle logger, if configured.
+   */
+  logger?: LifecycleLogger;
+
+  /**
+   * Returns whether a given lifecycle event should be logged.
+   *
+   * @param event - The lifecycle event to check.
+   */
+  shouldLog(event: LifecycleEvent): boolean;
 }
