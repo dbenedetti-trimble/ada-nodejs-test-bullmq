@@ -832,16 +832,10 @@ export class Job<
           tm,
         };
 
-        const queueLogger = this.queue.opts?.logger;
-        const queueLogEvents = this.queue.opts?.logEvents;
-
         let finishedOn: number;
         if (shouldRetry) {
-          if (
-            queueLogger &&
-            (!queueLogEvents || queueLogEvents.includes('job:retrying'))
-          ) {
-            queueLogger.warn({
+          if (this.queue.shouldLog('job:retrying')) {
+            this.queue.logger!.warn({
               timestamp: Date.now(),
               event: 'job:retrying',
               queue: this.queueName,
@@ -865,11 +859,8 @@ export class Job<
               { fieldsToUpdate },
             );
 
-            if (
-              queueLogger &&
-              (!queueLogEvents || queueLogEvents.includes('job:delayed'))
-            ) {
-              queueLogger.debug({
+            if (this.queue.shouldLog('job:delayed')) {
+              this.queue.logger!.debug({
                 timestamp: Date.now(),
                 event: 'job:delayed',
                 queue: this.queueName,
@@ -1458,13 +1449,8 @@ export class Job<
     );
     this.delay = finalDelay;
 
-    const queueLogger = this.queue.opts?.logger;
-    const queueLogEvents = this.queue.opts?.logEvents;
-    if (
-      queueLogger &&
-      (!queueLogEvents || queueLogEvents.includes('job:delayed'))
-    ) {
-      queueLogger.debug({
+    if (this.queue.shouldLog('job:delayed')) {
+      this.queue.logger!.debug({
         timestamp: Date.now(),
         event: 'job:delayed',
         queue: this.queueName,

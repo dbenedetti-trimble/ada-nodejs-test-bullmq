@@ -41,16 +41,16 @@ export interface QueueBaseOptions {
   telemetry?: Telemetry;
 
   /**
-   * Lifecycle logger instance. When provided, structured log entries are
-   * emitted at key job lifecycle points (added, active, completed, failed, etc.).
+   * Lifecycle logger instance. When provided, structured log entries
+   * are emitted for lifecycle events (see {@link LifecycleEvent} type).
    * If not provided, no lifecycle logging occurs.
    */
   logger?: LifecycleLogger;
 
   /**
-   * Optional array of lifecycle events to log. When provided alongside
-   * `logger`, only the listed events produce log calls. If omitted but
-   * `logger` is set, all lifecycle events are logged.
+   * Optional array of {@link LifecycleEvent} values to log. When provided
+   * alongside `logger`, only the listed events produce log calls. If omitted
+   * but `logger` is set, all lifecycle events are logged.
    */
   logEvents?: LifecycleEvent[];
 

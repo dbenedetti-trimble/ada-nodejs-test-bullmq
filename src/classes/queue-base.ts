@@ -193,7 +193,11 @@ export class QueueBase extends EventEmitter implements MinimalQueue {
     }
   }
 
-  protected shouldLog(event: LifecycleEvent): boolean {
+  get logger() {
+    return this.opts.logger;
+  }
+
+  shouldLog(event: LifecycleEvent): boolean {
     if (!this.opts.logger) {
       return false;
     }
