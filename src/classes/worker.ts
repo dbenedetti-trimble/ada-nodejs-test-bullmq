@@ -284,9 +284,15 @@ export class Worker<
       (typeof this.opts.deadLetterQueue.queueName !== 'string' ||
         this.opts.deadLetterQueue.queueName.trim() === '')
     ) {
-      throw new Error(
-        'deadLetterQueue.queueName must be a non-empty string',
-      );
+      throw new Error('deadLetterQueue.queueName must be a non-empty string');
+    }
+
+    if (this.opts.deadLetterQueue) {
+      this._dlqQueue = new Queue(this.opts.deadLetterQueue.queueName, {
+        connection: opts.connection,
+        prefix: (opts as any).prefix,
+        skipMetasUpdate: true,
+      });
     }
 
     this.concurrency = this.opts.concurrency;

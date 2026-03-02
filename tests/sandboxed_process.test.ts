@@ -58,7 +58,8 @@ describe('Sandboxed process using child processes', () => {
     });
 
     it('should handle non-BullMQ messages during child initialization', async function () {
-      const mainFile = __dirname + '/fixtures/fixture_main_non_bullmq_messages.js';
+      const mainFile =
+        __dirname + '/fixtures/fixture_main_non_bullmq_messages.js';
       const processFile = __dirname + '/fixtures/fixture_processor_simple.js';
 
       const child = new Child(mainFile, processFile, {

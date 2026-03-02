@@ -9,6 +9,7 @@ import {
   RepeatableJob,
   RepeatOptions,
   DeadLetterFilter,
+  DeadLetterMetadata,
 } from '../interfaces';
 import {
   FinishedStatus,
@@ -37,8 +38,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -1097,8 +1099,25 @@ export class Queue<
    * @returns New job ID in the source queue
    */
   async replayDeadLetter(jobId: string): Promise<string> {
-    // TODO(features): implement replayDeadLetter
-    throw new Error('replayDeadLetter: not yet implemented');
+    const dlqJob = await this.getJob(jobId);
+    if (!dlqJob) {
+      throw new Error(`DLQ job ${jobId} not found`);
+    }
+
+    const meta: DeadLetterMetadata = (dlqJob.data as any)?._dlqMeta;
+    if (!meta?.sourceQueue) {
+      throw new Error(`Job ${jobId} is missing _dlqMeta.sourceQueue`);
+    }
+
+    const { _dlqMeta, ...originalData } = dlqJob.data as any;
+
+    return this.scripts.replayFromDeadLetter(
+      jobId,
+      meta.sourceQueue,
+      originalData,
+      dlqJob.name,
+      meta.originalOpts,
+    );
   }
 
   /**
@@ -1108,8 +1127,34 @@ export class Queue<
    * @returns Count of jobs replayed
    */
   async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
-    // TODO(features): implement replayAllDeadLetters
-    throw new Error('replayAllDeadLetters: not yet implemented');
+    const dlqJobs = await this.getDeadLetterJobs(0, -1);
+    let count = 0;
+
+    for (const dlqJob of dlqJobs) {
+      const meta: DeadLetterMetadata = (dlqJob.data as any)?._dlqMeta;
+      if (!meta) {
+        continue;
+      }
+
+      if (filter?.name && dlqJob.name !== filter.name) {
+        continue;
+      }
+      if (filter?.failedReason) {
+        const reason = (meta.failedReason || '').toLowerCase();
+        if (!reason.includes(filter.failedReason.toLowerCase())) {
+          continue;
+        }
+      }
+
+      try {
+        await this.replayDeadLetter(dlqJob.id);
+        count++;
+      } catch {
+        // Job may have been concurrently replayed or removed; skip it
+      }
+    }
+
+    return count;
   }
 
   /**
@@ -1119,7 +1164,6 @@ export class Queue<
    * @returns Count of jobs removed
    */
   async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
-    // TODO(features): implement purgeDeadLetters
     return this.scripts.purgeDeadLetters(filter);
   }
 }

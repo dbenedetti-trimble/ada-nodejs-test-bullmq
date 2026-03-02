@@ -861,13 +861,19 @@ export class Job<
         } else {
           const workerOpts = this.queue.opts as WorkerOptions;
           if (workerOpts?.deadLetterQueue?.queueName) {
-            // TODO(features): pass fieldsToUpdate (stacktrace, failedReason) before calling moveToDeadLetter
+            const dlqQueueName = workerOpts.deadLetterQueue.queueName;
             await this.scripts.moveToDeadLetter(
               this,
               this.failedReason,
-              workerOpts.deadLetterQueue.queueName,
+              dlqQueueName,
               token,
               fetchNext,
+            );
+            this.queue.emit(
+              'deadLettered',
+              this,
+              dlqQueueName,
+              this.failedReason,
             );
           } else {
             const args = this.scripts.moveToFailedArgs(
