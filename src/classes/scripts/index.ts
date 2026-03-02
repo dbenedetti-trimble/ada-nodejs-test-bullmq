@@ -31,6 +31,7 @@ import {
   ScriptContext,
   finishedErrors as finishedErrorsFn,
   getKeepJobs as getKeepJobsFn,
+  isJobInList as isJobInListFn,
 } from './script-utils';
 import { JobScripts } from './job-scripts';
 import { QueueScripts } from './queue-scripts';
@@ -45,6 +46,7 @@ export class Scripts {
 
   moveToFinishedKeys: (string | undefined)[];
 
+  private _ctx: ScriptContext;
   private jobScripts: JobScripts;
   private queueScripts: QueueScripts;
   private flowScripts: FlowScripts;
@@ -71,6 +73,7 @@ export class Scripts {
       execCommand: this.execCommand.bind(this),
     };
 
+    this._ctx = ctx;
     this.jobScripts = new JobScripts(ctx);
     this.queueScripts = new QueueScripts(ctx);
     this.flowScripts = new FlowScripts(ctx);
@@ -90,7 +93,7 @@ export class Scripts {
   }
 
   async isJobInList(listKey: string, jobId: string): Promise<boolean> {
-    throw new Error('Not implemented: stub for features pass');
+    return isJobInListFn(this._ctx, listKey, jobId);
   }
 
   // --- Job domain delegation ---

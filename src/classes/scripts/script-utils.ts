@@ -9,7 +9,7 @@ import { DatabaseType } from '../../types/database-type';
 import { KeepJobs } from '../../types';
 import { ErrorCode } from '../../enums';
 import { UnrecoverableError } from '../errors';
-import { array2obj } from '../../utils';
+import { array2obj, isRedisVersionLowerThan } from '../../utils';
 
 const packer = new Packr({
   useRecords: false,
@@ -133,10 +133,19 @@ export function raw2NextJobData(raw: any[]) {
   return [];
 }
 
-export function isJobInList(
+export async function isJobInList(
   ctx: ScriptContext,
   listKey: string,
   jobId: string,
 ): Promise<boolean> {
-  throw new Error('Not implemented: stub for features pass');
+  const client = await ctx.client;
+  let result;
+  if (
+    isRedisVersionLowerThan(ctx.redisVersion, '6.0.6', ctx.databaseType)
+  ) {
+    result = await ctx.execCommand(client, 'isJobInList', [listKey, jobId]);
+  } else {
+    result = await (<any>client).lpos(listKey, jobId);
+  }
+  return Number.isInteger(result);
 }
