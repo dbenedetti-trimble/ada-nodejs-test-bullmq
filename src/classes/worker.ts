@@ -1089,6 +1089,7 @@ will never work with more accuracy than 1ms. */
       });
 
       await this.handleGroupPostCompletion(job, 'completed', result);
+      await this.handleCompensationPostCompletion(job, 'success');
 
       if (Array.isArray(completed)) {
         const [jobData, jobId, rateLimitDelay, delayUntil] = completed;
@@ -1153,6 +1154,7 @@ will never work with more accuracy than 1ms. */
           undefined,
           err.message,
         );
+        await this.handleCompensationPostCompletion(job, 'failure');
       }
 
       if (Array.isArray(result)) {
@@ -1185,9 +1187,7 @@ will never work with more accuracy than 1ms. */
         jobKey,
         status,
         groupOpts.name,
-        status === 'completed'
-          ? JSON.stringify(returnValue ?? null)
-          : '',
+        status === 'completed' ? JSON.stringify(returnValue ?? null) : '',
       );
 
       if (result === 2) {
@@ -1338,6 +1338,40 @@ will never work with more accuracy than 1ms. */
       'reason',
       reason,
     );
+  }
+
+  private async handleCompensationPostCompletion(
+    job: Job<DataType, ResultType, NameType>,
+    result: 'success' | 'failure',
+  ): Promise<void> {
+    const jobData = job.data as any;
+    if (!jobData?.groupId) {
+      return;
+    }
+
+    try {
+      const client = await this.client;
+      const groupId = jobData.groupId;
+      const prefix = this.opts.prefix || 'bull';
+      const groupName = jobData.originalJobName || '';
+
+      const queueForGroup = jobData.originalJobId
+        ? this.name.replace(/-compensation$/, '')
+        : this.name;
+      const groupHashKey = `${prefix}:${queueForGroup}:groups:${groupId}`;
+      const eventStreamKey = `${prefix}:${queueForGroup}:events`;
+
+      const keys = [groupHashKey, eventStreamKey];
+      const args = [result, Date.now().toString(), groupName, groupId];
+
+      await this.scripts.execCommand(
+        client,
+        'updateGroupCompensation',
+        keys.concat(args),
+      );
+    } catch (err) {
+      this.emit('error', err as Error);
+    }
   }
 
   /**

@@ -11,6 +11,7 @@ export class JobGroup {
   completedCount: number;
   failedCount: number;
   cancelledCount: number;
+  readonly compensation: string;
 
   constructor(metadata: GroupMetadata) {
     this.id = metadata.id;
@@ -22,6 +23,7 @@ export class JobGroup {
     this.completedCount = metadata.completedCount;
     this.failedCount = metadata.failedCount;
     this.cancelledCount = metadata.cancelledCount;
+    this.compensation = metadata.compensation || '{}';
   }
 
   static fromRedisHash(rawData: string[]): JobGroup | null {
@@ -63,7 +65,7 @@ export class JobGroup {
       completedCount: this.completedCount,
       failedCount: this.failedCount,
       cancelledCount: this.cancelledCount,
-      compensation: '',
+      compensation: this.compensation,
     };
   }
 }

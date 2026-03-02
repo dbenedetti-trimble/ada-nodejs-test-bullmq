@@ -42,8 +42,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -579,9 +580,7 @@ export class Queue<
     }
 
     if (groupState.state === 'COMPLETED') {
-      throw new InvalidGroupStateError(
-        'Cannot cancel a completed group',
-      );
+      throw new InvalidGroupStateError('Cannot cancel a completed group');
     }
 
     if (
@@ -612,8 +611,19 @@ export class Queue<
 
       const compensationJobDefs: any[] = [];
       for (const job of completedJobs) {
-        const compDef = compensation[job.jobKey] || this.findCompensationByJobName(compensation, job, client);
+        const jobNameRaw = await client.hget(job.jobKey, 'name');
+        const compDef = compensation[jobNameRaw || ''];
         if (compDef) {
+          const returnValueRaw = await client.hget(job.jobKey, 'returnvalue');
+          let originalReturnValue = null;
+          try {
+            originalReturnValue = returnValueRaw
+              ? JSON.parse(returnValueRaw)
+              : null;
+          } catch {
+            originalReturnValue = returnValueRaw;
+          }
+
           const compQueueName = `${job.queueName}-compensation`;
           const prefix = this.opts.prefix || 'bull';
           const compQueueBase = `${prefix}:${compQueueName}`;
@@ -623,12 +633,15 @@ export class Queue<
             name: compDef.name,
             data: {
               groupId,
-              originalJobName: job.jobId,
+              originalJobName: jobNameRaw,
               originalJobId: job.jobId,
-              originalReturnValue: null,
+              originalReturnValue,
               compensationData: compDef.data || {},
             },
-            opts: compDef.opts || { attempts: 3, backoff: { type: 'exponential', delay: 1000 } },
+            opts: compDef.opts || {
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 1000 },
+            },
             queueBase: compQueueBase,
             timestamp: Date.now().toString(),
           });
@@ -652,62 +665,80 @@ export class Queue<
         );
 
         const groupHashKey = `${this.keys.groups}:${groupId}`;
-        await client.hset(groupHashKey,
-          'state', 'COMPENSATING',
-          'totalCompJobs', compensationJobDefs.length.toString(),
-          'compSuccessCount', '0',
-          'compFailureCount', '0',
-          'updatedAt', Date.now().toString(),
+        await client.hset(
+          groupHashKey,
+          'state',
+          'COMPENSATING',
+          'totalCompJobs',
+          compensationJobDefs.length.toString(),
+          'compSuccessCount',
+          '0',
+          'compFailureCount',
+          '0',
+          'updatedAt',
+          Date.now().toString(),
         );
 
-        await client.xadd(this.keys.events, '*',
-          'event', 'group:compensating',
-          'groupId', groupId,
-          'groupName', groupState.name,
-          'failedJobId', '',
-          'reason', 'manual cancellation',
+        await client.xadd(
+          this.keys.events,
+          '*',
+          'event',
+          'group:compensating',
+          'groupId',
+          groupId,
+          'groupName',
+          groupState.name,
+          'failedJobId',
+          '',
+          'reason',
+          'manual cancellation',
         );
       } else {
         const groupHashKey = `${this.keys.groups}:${groupId}`;
-        await client.hset(groupHashKey,
-          'state', 'FAILED',
-          'updatedAt', Date.now().toString(),
+        await client.hset(
+          groupHashKey,
+          'state',
+          'FAILED',
+          'updatedAt',
+          Date.now().toString(),
         );
 
-        await client.xadd(this.keys.events, '*',
-          'event', 'group:failed',
-          'groupId', groupId,
-          'groupName', groupState.name,
-          'state', 'FAILED',
+        await client.xadd(
+          this.keys.events,
+          '*',
+          'event',
+          'group:failed',
+          'groupId',
+          groupId,
+          'groupName',
+          groupState.name,
+          'state',
+          'FAILED',
         );
       }
     } else {
       const groupHashKey = `${this.keys.groups}:${groupId}`;
-      await client.hset(groupHashKey,
-        'state', 'FAILED',
-        'updatedAt', Date.now().toString(),
+      await client.hset(
+        groupHashKey,
+        'state',
+        'FAILED',
+        'updatedAt',
+        Date.now().toString(),
       );
 
-      await client.xadd(this.keys.events, '*',
-        'event', 'group:failed',
-        'groupId', groupId,
-        'groupName', groupState.name,
-        'state', 'FAILED',
+      await client.xadd(
+        this.keys.events,
+        '*',
+        'event',
+        'group:failed',
+        'groupId',
+        groupId,
+        'groupName',
+        groupState.name,
+        'state',
+        'FAILED',
       );
     }
-  }
-
-  private findCompensationByJobName(
-    compensation: CompensationMapping,
-    job: GroupJobInfo,
-    _client: any,
-  ): any {
-    for (const [key, value] of Object.entries(compensation)) {
-      if (job.jobKey.includes(key) || key === job.jobId) {
-        return value;
-      }
-    }
-    return null;
   }
 
   /**
