@@ -2,6 +2,9 @@ import { v4 } from 'uuid';
 import {
   BaseJobOptions,
   BulkJobOptions,
+  CompensationMapping,
+  GroupMetadata,
+  GroupJobInfo,
   IoredisListener,
   JobSchedulerJson,
   MinimalQueue,
@@ -11,14 +14,17 @@ import {
 } from '../interfaces';
 import {
   FinishedStatus,
+  GroupJobStatus,
   JobsOptions,
   JobSchedulerTemplateOptions,
   JobProgress,
 } from '../types';
 import { Job } from './job';
+import { JobGroup } from './job-group';
 import { QueueGetters } from './queue-getters';
 import { Repeat } from './repeat';
 import { RedisConnection } from './redis-connection';
+import { GroupNotFoundError, InvalidGroupStateError } from './errors';
 import { SpanKind, TelemetryAttributes } from '../enums';
 import { JobScheduler } from './job-scheduler';
 import { version } from '../version';
@@ -36,8 +42,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -506,6 +513,308 @@ export class Queue<
 
       this.emit('paused');
     });
+  }
+
+  /**
+   * Get the metadata of a job group by its ID.
+   *
+   * @param groupId - The unique identifier of the group.
+   * @returns The group metadata, or null if the group does not exist.
+   */
+  async getGroupState(groupId: string): Promise<GroupMetadata | null> {
+    const client = await this.client;
+    const rawData = await this.scripts.getGroupStateCommand(client, groupId);
+    if (!rawData || rawData.length === 0) {
+      return null;
+    }
+    const group = JobGroup.fromRedisHash(rawData);
+    if (!group) {
+      return null;
+    }
+    return { ...group.toMetadata(), id: groupId };
+  }
+
+  /**
+   * Get all jobs belonging to a group with their current statuses.
+   *
+   * @param groupId - The unique identifier of the group.
+   * @returns Array of job info objects with status within the group.
+   */
+  async getGroupJobs(groupId: string): Promise<GroupJobInfo[]> {
+    const client = await this.client;
+    const groupJobsKey = `${this.keys.groups}:${groupId}:jobs`;
+    const rawData = await client.hgetall(groupJobsKey);
+    if (!rawData || Object.keys(rawData).length === 0) {
+      return [];
+    }
+
+    const prefix = this.opts.prefix || 'bull';
+    const jobs: GroupJobInfo[] = [];
+    for (const [jobKey, status] of Object.entries(rawData)) {
+      const prefixWithColon = `${prefix}:`;
+      const withoutPrefix = jobKey.startsWith(prefixWithColon)
+        ? jobKey.slice(prefixWithColon.length)
+        : jobKey;
+      const lastColon = withoutPrefix.lastIndexOf(':');
+      const jobId = lastColon > 0 ? withoutPrefix.slice(lastColon + 1) : jobKey;
+      const queueName =
+        lastColon > 0 ? withoutPrefix.slice(0, lastColon) : this.name;
+
+      jobs.push({
+        jobId,
+        jobKey,
+        status: status as GroupJobStatus,
+        queueName,
+      });
+    }
+
+    return jobs;
+  }
+
+  /**
+   * Cancel an active group. Pending jobs are cancelled, and compensation
+   * is triggered for already-completed jobs that have compensation mappings.
+   *
+   * @param groupId - The unique identifier of the group to cancel.
+   * @throws GroupNotFoundError if the group does not exist.
+   * @throws InvalidGroupStateError if the group is not in a cancellable state.
+   */
+  async cancelGroup(groupId: string): Promise<void> {
+    const groupState = await this.getGroupState(groupId);
+    if (!groupState) {
+      throw new GroupNotFoundError(groupId);
+    }
+
+    if (groupState.state === 'PENDING') {
+      throw new InvalidGroupStateError(
+        'Cannot cancel a group that is still being created',
+      );
+    }
+
+    if (groupState.state === 'COMPLETED') {
+      throw new InvalidGroupStateError('Cannot cancel a completed group');
+    }
+
+    if (
+      groupState.state === 'COMPENSATING' ||
+      groupState.state === 'FAILED' ||
+      groupState.state === 'FAILED_COMPENSATION'
+    ) {
+      throw new InvalidGroupStateError(
+        `Cannot cancel a group in '${groupState.state}' state`,
+      );
+    }
+
+    const client = await this.client;
+
+    await this.scripts.cancelGroupJobsCommand(client, groupId);
+
+    if (groupState.completedCount > 0) {
+      const compensationRaw = groupState.compensation;
+      let compensation: CompensationMapping = {};
+      try {
+        compensation = JSON.parse(compensationRaw || '{}');
+      } catch {
+        compensation = {};
+      }
+
+      const groupJobs = await this.getGroupJobs(groupId);
+      const completedJobs = groupJobs.filter(j => j.status === 'completed');
+
+      const prefix = this.opts.prefix || 'bull';
+      const compensationJobDefs: any[] = [];
+      const pipeline = (client as any).pipeline
+        ? (client as any).pipeline()
+        : null;
+
+      if (pipeline) {
+        for (const job of completedJobs) {
+          pipeline.hmget(job.jobKey, 'name', 'returnvalue');
+        }
+        const pipelineResults = await pipeline.exec();
+
+        for (let idx = 0; idx < completedJobs.length; idx++) {
+          const job = completedJobs[idx];
+          const [err, fields] = pipelineResults[idx];
+          if (err) {
+            continue;
+          }
+          const [jobNameRaw, returnValueRaw] = fields as [
+            string | null,
+            string | null,
+          ];
+
+          const compDef = compensation[jobNameRaw || ''];
+          if (!compDef) {
+            continue;
+          }
+
+          let originalReturnValue = null;
+          try {
+            originalReturnValue = returnValueRaw
+              ? JSON.parse(returnValueRaw)
+              : null;
+          } catch {
+            originalReturnValue = returnValueRaw;
+          }
+
+          const compQueueName = `${job.queueName}-compensation`;
+          const compQueueBase = `${prefix}:${compQueueName}`;
+
+          compensationJobDefs.push({
+            id: v4(),
+            name: compDef.name,
+            data: {
+              groupId,
+              originalJobName: jobNameRaw,
+              originalJobId: job.jobId,
+              originalReturnValue,
+              originalQueueName: job.queueName,
+              compensationData: compDef.data || {},
+            },
+            opts: compDef.opts || {
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 1000 },
+            },
+            queueBase: compQueueBase,
+            timestamp: Date.now().toString(),
+          });
+        }
+      } else {
+        for (const job of completedJobs) {
+          const [jobNameRaw, returnValueRaw] = await client.hmget(
+            job.jobKey,
+            'name',
+            'returnvalue',
+          );
+          const compDef = compensation[jobNameRaw || ''];
+          if (!compDef) {
+            continue;
+          }
+
+          let originalReturnValue = null;
+          try {
+            originalReturnValue = returnValueRaw
+              ? JSON.parse(returnValueRaw)
+              : null;
+          } catch {
+            originalReturnValue = returnValueRaw;
+          }
+
+          const compQueueName = `${job.queueName}-compensation`;
+          const compQueueBase = `${prefix}:${compQueueName}`;
+
+          compensationJobDefs.push({
+            id: v4(),
+            name: compDef.name,
+            data: {
+              groupId,
+              originalJobName: jobNameRaw,
+              originalJobId: job.jobId,
+              originalReturnValue,
+              originalQueueName: job.queueName,
+              compensationData: compDef.data || {},
+            },
+            opts: compDef.opts || {
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 1000 },
+            },
+            queueBase: compQueueBase,
+            timestamp: Date.now().toString(),
+          });
+        }
+      }
+
+      if (compensationJobDefs.length > 0) {
+        const firstJob = completedJobs[0];
+        const compQueueName = `${firstJob.queueName}-compensation`;
+        const compWaitKey = `${prefix}:${compQueueName}:wait`;
+        const compMetaKey = `${prefix}:${compQueueName}:meta`;
+        const compEventsKey = `${prefix}:${compQueueName}:events`;
+
+        await this.scripts.triggerCompensationCommand(
+          client,
+          compWaitKey,
+          compMetaKey,
+          compEventsKey,
+          JSON.stringify(compensationJobDefs),
+        );
+
+        const groupHashKey = `${this.keys.groups}:${groupId}`;
+        await client.hset(
+          groupHashKey,
+          'state',
+          'COMPENSATING',
+          'totalCompJobs',
+          compensationJobDefs.length.toString(),
+          'compSuccessCount',
+          '0',
+          'compFailureCount',
+          '0',
+          'updatedAt',
+          Date.now().toString(),
+        );
+
+        await client.xadd(
+          this.keys.events,
+          '*',
+          'event',
+          'group:compensating',
+          'groupId',
+          groupId,
+          'groupName',
+          groupState.name,
+          'failedJobId',
+          '',
+          'reason',
+          'manual cancellation',
+        );
+      } else {
+        const groupHashKey = `${this.keys.groups}:${groupId}`;
+        await client.hset(
+          groupHashKey,
+          'state',
+          'FAILED',
+          'updatedAt',
+          Date.now().toString(),
+        );
+
+        await client.xadd(
+          this.keys.events,
+          '*',
+          'event',
+          'group:failed',
+          'groupId',
+          groupId,
+          'groupName',
+          groupState.name,
+          'state',
+          'FAILED',
+        );
+      }
+    } else {
+      const groupHashKey = `${this.keys.groups}:${groupId}`;
+      await client.hset(
+        groupHashKey,
+        'state',
+        'FAILED',
+        'updatedAt',
+        Date.now().toString(),
+      );
+
+      await client.xadd(
+        this.keys.events,
+        '*',
+        'event',
+        'group:failed',
+        'groupId',
+        groupId,
+        'groupName',
+        groupState.name,
+        'state',
+        'FAILED',
+      );
+    }
   }
 
   /**

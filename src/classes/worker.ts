@@ -1088,6 +1088,9 @@ will never work with more accuracy than 1ms. */
         [TelemetryAttributes.JobAttemptsMade]: job.attemptsMade,
       });
 
+      await this.handleGroupPostCompletion(job, 'completed', result);
+      await this.handleCompensationPostCompletion(job, 'success');
+
       if (Array.isArray(completed)) {
         const [jobData, jobId, rateLimitDelay, delayUntil] = completed;
         this.updateDelays(rateLimitDelay, delayUntil);
@@ -1105,7 +1108,6 @@ will never work with more accuracy than 1ms. */
     span?: Span,
   ) {
     if (!this.connection.closing) {
-      // Check if the job was manually rate-limited
       if (err.message === RATE_LIMIT_ERROR) {
         const rateLimitTtl = await this.moveLimitedBackToWait(job, token);
         this.limitUntil = rateLimitTtl > 0 ? Date.now() + rateLimitTtl : 0;
@@ -1139,12 +1141,318 @@ will never work with more accuracy than 1ms. */
         [TelemetryAttributes.JobAttemptsMade]: job.attemptsMade,
       });
 
-      // Note: result can be undefined if moveToFailed fails (e.g., lock was lost)
+      const maxAttempts = job.opts.attempts || 0;
+      const isActuallyFailed =
+        maxAttempts === 0 ||
+        job.attemptsMade >= maxAttempts ||
+        err instanceof UnrecoverableError ||
+        err.name === 'UnrecoverableError';
+      if (isActuallyFailed) {
+        await this.handleGroupPostCompletion(
+          job,
+          'failed',
+          undefined,
+          err.message,
+        );
+        await this.handleCompensationPostCompletion(job, 'failure');
+      }
+
       if (Array.isArray(result)) {
         const [jobData, jobId, rateLimitDelay, delayUntil] = result;
         this.updateDelays(rateLimitDelay, delayUntil);
         return this.nextJobFromJobData(jobData, jobId, token);
       }
+    }
+  }
+
+  protected async handleGroupPostCompletion(
+    job: Job<DataType, ResultType, NameType>,
+    status: 'completed' | 'failed',
+    returnValue?: any,
+    failedReason?: string,
+  ): Promise<void> {
+    const groupOpts = job.opts?.group;
+    if (!groupOpts) {
+      return;
+    }
+
+    try {
+      const client = await this.client;
+      const prefix = this.opts.prefix || 'bull';
+      const jobKey = `${prefix}:${this.name}:${job.id}`;
+
+      const result = await this.scripts.updateGroupOnFinishedCommand(
+        client,
+        groupOpts.id,
+        jobKey,
+        status,
+        groupOpts.name,
+        status === 'completed' ? JSON.stringify(returnValue ?? null) : '',
+        failedReason || '',
+      );
+
+      if (result === 2) {
+        await this.scripts.cancelGroupJobsCommand(client, groupOpts.id);
+        await this.triggerGroupCompensation(
+          client,
+          groupOpts.id,
+          groupOpts.name,
+          job.id,
+          failedReason || 'unknown',
+        );
+      } else if (result === 3) {
+        await this.scripts.cancelGroupJobsCommand(client, groupOpts.id);
+      }
+    } catch (err) {
+      this.emit('error', err as Error);
+    }
+  }
+
+  private async triggerGroupCompensation(
+    client: RedisClient,
+    groupId: string,
+    groupName: string,
+    failedJobId: string,
+    reason: string,
+  ): Promise<void> {
+    const prefix = this.opts.prefix || 'bull';
+    const groupHashKey = `${this.keys.groups}:${groupId}`;
+
+    const compensationRaw = await client.hget(groupHashKey, 'compensation');
+    if (!compensationRaw) {
+      return;
+    }
+
+    let compensation: Record<string, any>;
+    try {
+      compensation = JSON.parse(compensationRaw);
+    } catch (err) {
+      this.emit(
+        'error',
+        new Error(
+          `Failed to parse compensation mapping for group ${groupId}: ${(err as Error).message}`,
+        ),
+      );
+      return;
+    }
+
+    const groupJobsKey = `${this.keys.groups}:${groupId}:jobs`;
+    const allJobs = await client.hgetall(groupJobsKey);
+
+    const completedJobKeys = Object.entries(allJobs)
+      .filter(([, status]) => status === 'completed')
+      .map(([key]) => key);
+
+    if (completedJobKeys.length === 0) {
+      return;
+    }
+
+    const pipeline = (client as any).pipeline
+      ? (client as any).pipeline()
+      : null;
+
+    if (pipeline) {
+      for (const jobKey of completedJobKeys) {
+        pipeline.hmget(jobKey, 'returnvalue', 'name');
+      }
+      const pipelineResults = await pipeline.exec();
+
+      const compensationJobDefs: any[] = [];
+      for (let idx = 0; idx < completedJobKeys.length; idx++) {
+        const jobKey = completedJobKeys[idx];
+        const prefixWithColon = `${prefix}:`;
+        const withoutPrefix = jobKey.startsWith(prefixWithColon)
+          ? jobKey.slice(prefixWithColon.length)
+          : jobKey;
+        const lastColon = withoutPrefix.lastIndexOf(':');
+        const jobQueueName =
+          lastColon > 0 ? withoutPrefix.slice(0, lastColon) : this.name;
+        const jobId =
+          lastColon > 0 ? withoutPrefix.slice(lastColon + 1) : jobKey;
+
+        const [err, fields] = pipelineResults[idx];
+        if (err) {
+          continue;
+        }
+        const [returnValueRaw, jobNameRaw] = fields as [
+          string | null,
+          string | null,
+        ];
+
+        let originalReturnValue = null;
+        try {
+          originalReturnValue = returnValueRaw
+            ? JSON.parse(returnValueRaw)
+            : null;
+        } catch {
+          originalReturnValue = returnValueRaw;
+        }
+
+        const compDef = compensation[jobNameRaw || ''];
+        if (!compDef) {
+          continue;
+        }
+
+        const compQueueName = `${jobQueueName}-compensation`;
+        const compQueueBase = `${prefix}:${compQueueName}`;
+
+        compensationJobDefs.push({
+          id: `comp-${v4()}`,
+          name: compDef.name,
+          data: {
+            groupId,
+            originalJobName: jobNameRaw,
+            originalJobId: jobId,
+            originalReturnValue,
+            originalQueueName: jobQueueName,
+            compensationData: compDef.data || {},
+          },
+          opts: compDef.opts || {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 1000 },
+          },
+          queueBase: compQueueBase,
+          timestamp: Date.now().toString(),
+        });
+      }
+
+      if (compensationJobDefs.length > 0) {
+        const firstCompJobDef = compensationJobDefs[0];
+        const compWaitKey = `${firstCompJobDef.queueBase}:wait`;
+        const compMetaKey = `${firstCompJobDef.queueBase}:meta`;
+        const compEventsKey = `${firstCompJobDef.queueBase}:events`;
+
+        await this.scripts.triggerCompensationCommand(
+          client,
+          compWaitKey,
+          compMetaKey,
+          compEventsKey,
+          JSON.stringify(compensationJobDefs),
+        );
+
+        await client.hset(
+          groupHashKey,
+          'totalCompJobs',
+          compensationJobDefs.length.toString(),
+          'compSuccessCount',
+          '0',
+          'compFailureCount',
+          '0',
+        );
+      }
+    } else {
+      const compensationJobDefs: any[] = [];
+      for (const jobKey of completedJobKeys) {
+        const prefixWithColon = `${prefix}:`;
+        const withoutPrefix = jobKey.startsWith(prefixWithColon)
+          ? jobKey.slice(prefixWithColon.length)
+          : jobKey;
+        const lastColon = withoutPrefix.lastIndexOf(':');
+        const jobQueueName =
+          lastColon > 0 ? withoutPrefix.slice(0, lastColon) : this.name;
+        const jobId =
+          lastColon > 0 ? withoutPrefix.slice(lastColon + 1) : jobKey;
+
+        const [returnValueRaw, jobNameRaw] = await client.hmget(
+          jobKey,
+          'returnvalue',
+          'name',
+        );
+
+        let originalReturnValue = null;
+        try {
+          originalReturnValue = returnValueRaw
+            ? JSON.parse(returnValueRaw)
+            : null;
+        } catch {
+          originalReturnValue = returnValueRaw;
+        }
+
+        const compDef = compensation[jobNameRaw || ''];
+        if (!compDef) {
+          continue;
+        }
+
+        const compQueueName = `${jobQueueName}-compensation`;
+        const compQueueBase = `${prefix}:${compQueueName}`;
+
+        compensationJobDefs.push({
+          id: `comp-${v4()}`,
+          name: compDef.name,
+          data: {
+            groupId,
+            originalJobName: jobNameRaw,
+            originalJobId: jobId,
+            originalReturnValue,
+            originalQueueName: jobQueueName,
+            compensationData: compDef.data || {},
+          },
+          opts: compDef.opts || {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 1000 },
+          },
+          queueBase: compQueueBase,
+          timestamp: Date.now().toString(),
+        });
+      }
+
+      if (compensationJobDefs.length > 0) {
+        const firstCompJobDef = compensationJobDefs[0];
+        const compWaitKey = `${firstCompJobDef.queueBase}:wait`;
+        const compMetaKey = `${firstCompJobDef.queueBase}:meta`;
+        const compEventsKey = `${firstCompJobDef.queueBase}:events`;
+
+        await this.scripts.triggerCompensationCommand(
+          client,
+          compWaitKey,
+          compMetaKey,
+          compEventsKey,
+          JSON.stringify(compensationJobDefs),
+        );
+
+        await client.hset(
+          groupHashKey,
+          'totalCompJobs',
+          compensationJobDefs.length.toString(),
+          'compSuccessCount',
+          '0',
+          'compFailureCount',
+          '0',
+        );
+      }
+    }
+  }
+
+  private async handleCompensationPostCompletion(
+    job: Job<DataType, ResultType, NameType>,
+    result: 'success' | 'failure',
+  ): Promise<void> {
+    const jobData = job.data as any;
+    if (!jobData?.groupId) {
+      return;
+    }
+
+    try {
+      const client = await this.client;
+      const groupId = jobData.groupId;
+      const prefix = this.opts.prefix || 'bull';
+      const groupName = jobData.originalJobName || '';
+
+      const queueForGroup =
+        jobData.originalQueueName || this.name.replace(/-compensation$/, '');
+      const groupHashKey = `${prefix}:${queueForGroup}:groups:${groupId}`;
+      const eventStreamKey = `${prefix}:${queueForGroup}:events`;
+
+      const keys = [groupHashKey, eventStreamKey];
+      const args = [result, Date.now().toString(), groupName, groupId];
+
+      await this.scripts.execCommand(
+        client,
+        'updateGroupCompensation',
+        keys.concat(args),
+      );
+    } catch (err) {
+      this.emit('error', err as Error);
     }
   }
 

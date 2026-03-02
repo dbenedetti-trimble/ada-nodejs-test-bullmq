@@ -159,6 +159,62 @@ export interface QueueEventsListener extends IoredisListener {
   ) => void;
 
   /**
+   * Listen to 'group:completed' event.
+   *
+   * This event is triggered when all jobs in a transactional group
+   * complete successfully.
+   *
+   * @param args - An object containing the group identifier and name.
+   *   - `groupId` - The unique identifier of the group.
+   *   - `groupName` - The name of the group.
+   * @param id - The identifier of the event.
+   */
+  'group:completed': (
+    args: { groupId: string; groupName: string },
+    id: string,
+  ) => void;
+
+  /**
+   * Listen to 'group:compensating' event.
+   *
+   * This event is triggered when a job in a group fails and compensation
+   * is started for completed siblings.
+   *
+   * @param args - An object containing group and failure details.
+   *   - `groupId` - The unique identifier of the group.
+   *   - `groupName` - The name of the group.
+   *   - `failedJobId` - The ID of the job whose failure triggered compensation.
+   *   - `reason` - The failure reason.
+   * @param id - The identifier of the event.
+   */
+  'group:compensating': (
+    args: {
+      groupId: string;
+      groupName: string;
+      failedJobId: string;
+      reason: string;
+    },
+    id: string,
+  ) => void;
+
+  /**
+   * Listen to 'group:failed' event.
+   *
+   * This event is triggered when a group reaches a terminal failure state
+   * (FAILED or FAILED_COMPENSATION).
+   *
+   * @param args - An object containing group details and terminal state.
+   *   - `groupId` - The unique identifier of the group.
+   *   - `groupName` - The name of the group.
+   *   - `state` - The terminal state ("FAILED" or "FAILED_COMPENSATION").
+   * @param id - The identifier of the event.
+   */
+  'group:failed': (
+    args: { groupId: string; groupName: string; state: string },
+    id: string,
+  ) => void;
+
+  /**
    * Listen to 'paused' event.
    *
    * This event is triggered when the queue is paused, halting the processing of new jobs.
