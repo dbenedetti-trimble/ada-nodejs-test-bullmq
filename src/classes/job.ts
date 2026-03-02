@@ -783,13 +783,15 @@ export class Job<
         this.opts.errorBackoffs?.[err?.name] ??
         (this.opts.backoff as BackoffOptions);
 
-      const delay = await Backoffs.calculate(
-        effectiveBackoff,
-        this.attemptsMade + 1,
-        err,
-        this,
-        opts.settings && opts.settings.backoffStrategy,
-      );
+      const delay = effectiveBackoff
+        ? await Backoffs.calculate(
+            effectiveBackoff,
+            this.attemptsMade + 1,
+            err,
+            this,
+            opts.settings && opts.settings.backoffStrategy,
+          )
+        : 0;
 
       return [delay == -1 ? false : true, delay == -1 ? 0 : delay];
     } else {

@@ -651,8 +651,6 @@ export class Worker<
         !this.isRateLimited() &&
         (!this.circuitBreaker || this.circuitBreaker.shouldAllowJob())
       ) {
-        this.circuitBreaker?.trackHalfOpenAttempt();
-
         const token = `${this.id}:${tokenPostfix++}`;
 
         const fetchedJob = this.retryIfFailed<void | Job<
@@ -673,6 +671,10 @@ export class Worker<
         // We await here so that we fetch jobs in sequence, this is important to avoid unnecessary calls
         // to Redis in high concurrency scenarios.
         const job = await fetchedJob;
+
+        if (job) {
+          this.circuitBreaker?.trackHalfOpenAttempt();
+        }
 
         // No more jobs waiting but we have others that could start processing already
         if (!job && asyncFifoQueue.numTotal() > 1) {
