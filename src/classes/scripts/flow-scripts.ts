@@ -109,7 +109,7 @@ export class FlowScripts {
     }
   }
 
-  public getDependencyCountsArgs(
+  private getDependencyCountsArgs(
     jobId: string,
     types: string[],
   ): (string | number)[] {
@@ -127,17 +127,10 @@ export class FlowScripts {
     return keys.concat(args);
   }
 
-  async getDependencyCounts(
-    jobId: string,
-    types: string[],
-  ): Promise<number[]> {
+  async getDependencyCounts(jobId: string, types: string[]): Promise<number[]> {
     const client = await this.ctx.client;
     const args = this.getDependencyCountsArgs(jobId, types);
 
-    return await this.ctx.execCommand(
-      client,
-      'getDependencyCounts',
-      args,
-    );
+    return await this.ctx.execCommand(client, 'getDependencyCounts', args);
   }
 }
