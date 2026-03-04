@@ -70,7 +70,11 @@ describe('lifecycle logging', () => {
   afterEach(async () => {
     sandbox.restore();
     await queue.close();
-    await removeAllQueueData(new IORedis(redisHost), queueName);
+    const cleanupConnection = new IORedis(redisHost, {
+      maxRetriesPerRequest: null,
+    });
+    await removeAllQueueData(cleanupConnection, queueName);
+    await cleanupConnection.quit();
   });
 
   afterAll(async () => {
@@ -107,7 +111,7 @@ describe('lifecycle logging', () => {
       );
       expect(addedEntries.length).toBeGreaterThanOrEqual(1);
       expect(addedEntries[0].queue).toBe(queueName);
-      expect(addedEntries[0].jobId).toBeDefined();
+      expect(addedEntries[0].jobId).toBeTypeOf('string');
       expect(addedEntries[0].jobName).toBe('test-job');
       expect(addedEntries[0].timestamp).toBeTypeOf('number');
 
@@ -115,16 +119,16 @@ describe('lifecycle logging', () => {
         e => e.event === 'job:active',
       );
       expect(activeEntries.length).toBeGreaterThanOrEqual(1);
-      expect(activeEntries[0].jobId).toBeDefined();
-      expect(activeEntries[0].attemptsMade).toBeDefined();
+      expect(activeEntries[0].jobId).toBeTypeOf('string');
+      expect(activeEntries[0].attemptsMade).toBeTypeOf('number');
 
       const completedEntries = logger.allEntries.filter(
         e => e.event === 'job:completed',
       );
       expect(completedEntries.length).toBeGreaterThanOrEqual(1);
-      expect(completedEntries[0].jobId).toBeDefined();
+      expect(completedEntries[0].jobId).toBeTypeOf('string');
       expect(completedEntries[0].duration).toBeGreaterThan(0);
-      expect(completedEntries[0].attemptsMade).toBeDefined();
+      expect(completedEntries[0].attemptsMade).toBeTypeOf('number');
     });
   });
 
@@ -156,11 +160,12 @@ describe('lifecycle logging', () => {
         e => e.event === 'job:failed',
       );
       expect(failedEntries.length).toBeGreaterThanOrEqual(1);
-      expect(failedEntries[0].jobId).toBeDefined();
+      expect(failedEntries[0].jobId).toBeTypeOf('string');
       expect(failedEntries[0].jobName).toBe('failing-job');
-      expect(failedEntries[0].attemptsMade).toBeDefined();
-      expect(failedEntries[0].data).toBeDefined();
-      expect(failedEntries[0].data!.failedReason).toBe('test failure');
+      expect(failedEntries[0].attemptsMade).toBeTypeOf('number');
+      expect(failedEntries[0].data).toEqual(
+        expect.objectContaining({ failedReason: 'test failure' }),
+      );
     });
   });
 
@@ -199,10 +204,11 @@ describe('lifecycle logging', () => {
         e => e.event === 'job:retrying',
       );
       expect(retryEntries.length).toBeGreaterThanOrEqual(1);
-      expect(retryEntries[0].jobId).toBeDefined();
-      expect(retryEntries[0].attemptsMade).toBeDefined();
-      expect(retryEntries[0].data).toBeDefined();
-      expect(retryEntries[0].data!.maxAttempts).toBe(3);
+      expect(retryEntries[0].jobId).toBeTypeOf('string');
+      expect(retryEntries[0].attemptsMade).toBeTypeOf('number');
+      expect(retryEntries[0].data).toEqual(
+        expect.objectContaining({ maxAttempts: 3 }),
+      );
     });
   });
 
@@ -316,7 +322,7 @@ describe('lifecycle logging', () => {
         expect(entry.timestamp).toBeTypeOf('number');
         expect(entry.queue).toBe(queueName);
         if (entry.event !== 'job:stalled') {
-          expect(entry.jobId).toBeDefined();
+          expect(entry.jobId).toBeTypeOf('string');
         }
       }
     });
@@ -332,7 +338,9 @@ describe('lifecycle logging', () => {
 
       const event: LifecycleEvent = 'job:added';
 
-      expect(logger).toBeDefined();
+      expect(typeof logger.debug).toBe('function');
+      expect(typeof logger.warn).toBe('function');
+      expect(typeof logger.error).toBe('function');
       expect(event).toBe('job:added');
     });
   });
