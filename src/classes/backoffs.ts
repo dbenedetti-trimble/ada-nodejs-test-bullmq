@@ -50,6 +50,11 @@ export class Backoffs {
 
     polynomial: function (delay: number, jitter = 0, opts?: BackoffOptions) {
       const exponent = opts?.exponent ?? 2;
+      if (typeof exponent !== 'number' || exponent <= 0) {
+        throw new Error(
+          'Polynomial backoff: exponent must be a positive number',
+        );
+      }
       return function (attemptsMade: number): number {
         const rawDelay = delay * Math.pow(attemptsMade, exponent);
         if (jitter > 0) {
@@ -105,6 +110,14 @@ export class Backoffs {
     customStrategy?: BackoffStrategy,
   ): Promise<number | undefined> {
     if (backoff) {
+      if (
+        backoff.maxDelay !== undefined &&
+        typeof backoff.maxDelay === 'number' &&
+        backoff.maxDelay < 0
+      ) {
+        throw new Error('maxDelay must be a positive number or 0');
+      }
+
       const strategy = lookupStrategy(backoff, customStrategy);
 
       const rawDelay = await strategy(attemptsMade, backoff.type, err, job);

@@ -58,6 +58,7 @@ export class CircuitBreaker {
   recordFailure(): CircuitBreakerTransition {
     if (this.state === CircuitBreakerState.HALF_OPEN) {
       this.halfOpenAttempts = 0;
+      this.failureCount = 1;
       return this.transitionToOpen();
     }
 
