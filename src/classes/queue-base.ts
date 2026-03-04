@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events';
 import {
+  LifecycleEvent,
+  LifecycleLogger,
   MinimalQueue,
   QueueBaseOptions,
   RedisClient,
@@ -37,6 +39,9 @@ export class QueueBase extends EventEmitter implements MinimalQueue {
   protected connection: RedisConnection;
   public readonly qualifiedName: string;
 
+  protected readonly logger?: LifecycleLogger;
+  private readonly logEventsSet?: Set<LifecycleEvent>;
+
   /**
    *
    * @param name - The name of the queue.
@@ -57,6 +62,11 @@ export class QueueBase extends EventEmitter implements MinimalQueue {
       prefix: 'bull',
       ...opts,
     };
+
+    this.logger = this.opts.logger;
+    if (this.logger && this.opts.logEvents) {
+      this.logEventsSet = new Set(this.opts.logEvents);
+    }
 
     if (!name) {
       throw new Error('Queue name must be provided');
@@ -218,5 +228,15 @@ export class QueueBase extends EventEmitter implements MinimalQueue {
       callback,
       srcPropagationMetadata,
     );
+  }
+
+  protected shouldLog(event: LifecycleEvent): boolean {
+    if (!this.logger) {
+      return false;
+    }
+    if (this.logEventsSet) {
+      return this.logEventsSet.has(event);
+    }
+    return true;
   }
 }
