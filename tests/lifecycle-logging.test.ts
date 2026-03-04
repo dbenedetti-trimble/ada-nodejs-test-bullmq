@@ -65,16 +65,13 @@ describe('lifecycle logging', () => {
   beforeEach(async () => {
     queueName = `test-${v4()}`;
     queue = new Queue(queueName, { connection, prefix });
+    await queue.waitUntilReady();
   });
 
   afterEach(async () => {
     sandbox.restore();
     await queue.close();
-    const cleanupConnection = new IORedis(redisHost, {
-      maxRetriesPerRequest: null,
-    });
-    await removeAllQueueData(cleanupConnection, queueName);
-    await cleanupConnection.quit();
+    await removeAllQueueData(new IORedis(redisHost), queueName);
   });
 
   afterAll(async () => {
