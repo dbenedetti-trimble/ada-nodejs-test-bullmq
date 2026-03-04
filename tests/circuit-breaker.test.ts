@@ -21,7 +21,7 @@ describe('Circuit breaker', () => {
   let queue: Queue;
   let queueName: string;
 
-  let connection;
+  let connection: IORedis;
   beforeAll(async () => {
     connection = new IORedis(redisHost, { maxRetriesPerRequest: null });
   });
@@ -315,7 +315,8 @@ describe('Circuit breaker', () => {
       const payload = await closedEvent;
 
       expect(worker.getCircuitBreakerState()).toEqual('closed');
-      expect(payload.testJobId).toBeDefined();
+      expect(typeof payload.testJobId).toBe('string');
+      expect(payload.testJobId.length).toBeGreaterThan(0);
 
       await worker.close();
     });
@@ -611,8 +612,8 @@ describe('Circuit breaker', () => {
 
       const payload = await closedEvent;
 
-      expect(payload.testJobId).toBeDefined();
       expect(typeof payload.testJobId).toBe('string');
+      expect(payload.testJobId.length).toBeGreaterThan(0);
 
       await worker.close();
     });

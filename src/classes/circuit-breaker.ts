@@ -1,10 +1,25 @@
 import { CircuitBreakerOptions } from '../interfaces/circuit-breaker-options';
 import { CircuitBreakerState } from '../enums/circuit-breaker-state';
 
-export interface CircuitBreakerTransition {
-  transition?: CircuitBreakerState;
-  payload?: any;
+export interface CircuitBreakerOpenPayload {
+  failures: number;
+  threshold: number;
 }
+
+export interface CircuitBreakerClosedPayload {
+  testJobId: string;
+}
+
+export type CircuitBreakerTransition =
+  | { transition?: undefined; payload?: undefined }
+  | {
+      transition: typeof CircuitBreakerState.OPEN;
+      payload: CircuitBreakerOpenPayload;
+    }
+  | {
+      transition: typeof CircuitBreakerState.CLOSED;
+      payload: CircuitBreakerClosedPayload;
+    };
 
 export class CircuitBreaker {
   private state: CircuitBreakerState = CircuitBreakerState.CLOSED;
