@@ -864,14 +864,15 @@ export class Job<
             // DLQ path: move job to dead letter queue instead of failed set
             const args = this.scripts.moveToDeadLetterArgs(
               this,
-              this.failedReason,
+              this.failedReason ?? '',
               workerOpts.deadLetterQueue.queueName,
               token,
               this.opts.removeOnFail,
+              this.queueName,
               fieldsToUpdate,
             );
 
-            result = await this.scripts.moveToDeadLetter(this.id, args);
+            await this.scripts.moveToDeadLetter(this.id, args);
             finishedOn = Date.now();
 
             this.recordJobMetrics('failed');

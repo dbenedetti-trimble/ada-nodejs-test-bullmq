@@ -1055,7 +1055,6 @@ export class Queue<
    * intended for use when this queue acts as a dead letter queue.
    */
   async getDeadLetterCount(): Promise<number> {
-    // TODO: Implement in features pass
     return this.getJobCountByTypes('waiting');
   }
 
@@ -1067,7 +1066,6 @@ export class Queue<
     start?: number,
     end?: number,
   ): Promise<Job<DataType, ResultType, NameType>[]> {
-    // TODO: Implement in features pass
     return this.getJobs(['waiting'], start, end, false) as Promise<
       Job<DataType, ResultType, NameType>[]
     >;
@@ -1079,7 +1077,6 @@ export class Queue<
   async peekDeadLetter(
     jobId: string,
   ): Promise<Job<DataType, ResultType, NameType> | undefined> {
-    // TODO: Implement in features pass
     return this.getJob(jobId) as Promise<
       Job<DataType, ResultType, NameType> | undefined
     >;
@@ -1090,7 +1087,6 @@ export class Queue<
    * Returns the new job ID in the source queue.
    */
   async replayDeadLetter(jobId: string): Promise<string> {
-    // TODO: Implement in features pass
     const job = await this.getJob(jobId);
     if (!job) {
       throw new Error(`Dead letter job ${jobId} not found`);
@@ -1104,7 +1100,8 @@ export class Queue<
     }
 
     const newJobId = v4();
-    const sourceQueuePrefix = `${this.qualifiedName.split(this.name)[0]}${dlqMeta.sourceQueue}:`;
+    const prefix = this.opts?.prefix ?? 'bull';
+    const sourceQueuePrefix = `${prefix}:${dlqMeta.sourceQueue}:`;
 
     return this.scripts.replayFromDeadLetter(
       jobId,
@@ -1118,22 +1115,26 @@ export class Queue<
    * their original source queues. Returns the count of replayed jobs.
    */
   async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
-    // TODO: Implement in features pass
     let replayed = 0;
     const jobs = await this.getJobs(['waiting'], 0, -1, false);
 
     for (const job of jobs) {
       const dlqMeta = (job.data as any)?._dlqMeta;
-      if (!dlqMeta) continue;
+      if (!dlqMeta) {
+        continue;
+      }
 
-      if (filter?.name && job.name !== filter.name) continue;
+      if (filter?.name && job.name !== filter.name) {
+        continue;
+      }
       if (
         filter?.failedReason &&
         !(dlqMeta.failedReason ?? '')
           .toLowerCase()
           .includes(filter.failedReason.toLowerCase())
-      )
+      ) {
         continue;
+      }
 
       await this.replayDeadLetter(job.id!);
       replayed++;
@@ -1147,7 +1148,6 @@ export class Queue<
    * Returns the count of removed jobs.
    */
   async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
-    // TODO: Implement in features pass
     return this.scripts.purgeDeadLetters(filter);
   }
 

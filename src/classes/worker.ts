@@ -1155,7 +1155,13 @@ will never work with more accuracy than 1ms. */
       this.emit('failed', job, err, 'active');
 
       if (this.opts.deadLetterQueue?.queueName) {
-        this.emit('deadLettered', job, err, 'active');
+        const isTerminalFailure =
+          job.attemptsMade >= (job.opts?.attempts || 0) ||
+          err instanceof UnrecoverableError ||
+          err.name === 'UnrecoverableError';
+        if (isTerminalFailure) {
+          this.emit('deadLettered', job, err, 'active');
+        }
       }
 
       span?.addEvent('job failed', {
