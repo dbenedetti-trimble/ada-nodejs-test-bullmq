@@ -46,6 +46,7 @@ export class Scripts {
 
   moveToFinishedKeys: (string | undefined)[];
 
+  private ctx: ScriptContext;
   private jobScripts: JobScripts;
   private queueScripts: QueueScripts;
   private flowScripts: FlowScripts;
@@ -73,6 +74,7 @@ export class Scripts {
       execCommand: this.execCommand.bind(this),
     };
 
+    this.ctx = ctx;
     this.jobScripts = new JobScripts(ctx);
     this.queueScripts = new QueueScripts(ctx);
     this.flowScripts = new FlowScripts(ctx);
@@ -87,16 +89,15 @@ export class Scripts {
     commandName: string,
     args: any[],
   ) {
-    // TODO: implement in features pass
-    throw new Error('Not implemented');
+    const commandNameWithVersion = `${commandName}:${this.version}`;
+    return (<any>client)[commandNameWithVersion](args);
   }
 
   async isJobInList(
     listKey: string,
     jobId: string,
   ): Promise<boolean> {
-    // TODO: implement in features pass — delegates to isJobInListUtil
-    throw new Error('Not implemented');
+    return isJobInListUtil(this.ctx, listKey, jobId);
   }
 
   // --- Job domain delegations ---
