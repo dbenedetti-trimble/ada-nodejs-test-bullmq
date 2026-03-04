@@ -5,6 +5,7 @@ import {
   DependenciesOpts,
   JobJson,
   JobJsonRaw,
+  LifecycleEvent,
   MinimalJob,
   MinimalQueue,
   MoveToWaitingChildrenOpts,
@@ -835,7 +836,6 @@ export class Job<
         let finishedOn: number;
         if (shouldRetry) {
           if (retryDelay) {
-            // Retry with delay
             result = await this.scripts.moveToDelayed(
               this.id,
               Date.now(),
@@ -845,8 +845,19 @@ export class Job<
             );
 
             this.recordJobMetrics('delayed');
+
+            this.logLifecycleEvent('job:retrying', 'warn', {
+              attemptsMade: this.attemptsMade + 1,
+              data: {
+                delay: retryDelay,
+                maxAttempts: this.opts.attempts,
+              },
+            });
+
+            this.logLifecycleEvent('job:delayed', 'debug', {
+              data: { delay: retryDelay },
+            });
           } else {
-            // Retry immediately
             result = await this.scripts.retryJob(
               this.id,
               this.opts.lifo,
@@ -857,6 +868,14 @@ export class Job<
             );
 
             this.recordJobMetrics('retried');
+
+            this.logLifecycleEvent('job:retrying', 'warn', {
+              attemptsMade: this.attemptsMade + 1,
+              data: {
+                delay: 0,
+                maxAttempts: this.opts.attempts,
+              },
+            });
           }
         } else {
           const args = this.scripts.moveToFailedArgs(
@@ -1425,6 +1444,10 @@ export class Job<
 
     this.recordJobMetrics('delayed');
 
+    this.logLifecycleEvent('job:delayed', 'debug', {
+      data: { delay: finalDelay },
+    });
+
     return movedToDelayed;
   }
 
@@ -1497,6 +1520,27 @@ export class Job<
    */
   discard(): void {
     this.discarded = true;
+  }
+
+  private logLifecycleEvent(
+    event: LifecycleEvent,
+    level: 'debug' | 'warn' | 'error',
+    extra: {
+      attemptsMade?: number;
+      duration?: number;
+      data?: Record<string, unknown>;
+    } = {},
+  ): void {
+    if (this.queue.shouldLog(event)) {
+      this.queue.logger![level]({
+        timestamp: Date.now(),
+        event,
+        queue: this.queue.name,
+        jobId: this.id,
+        jobName: this.name,
+        ...extra,
+      });
+    }
   }
 
   private async isInZSet(set: string): Promise<boolean> {
