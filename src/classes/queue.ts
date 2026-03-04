@@ -1179,9 +1179,61 @@ export class Queue<
   /**
    * Purges dead-lettered jobs matching the optional filter.
    * Returns the count of removed jobs.
+   *
+   * Jobs are fetched in batches to avoid loading the entire DLQ into memory.
    */
   async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
-    return this.scripts.purgeDeadLetters(filter);
+    const batchSize = 100;
+    let purged = 0;
+    let start = 0;
+
+    for (;;) {
+      const jobs = await this.getJobs(
+        ['waiting'],
+        start,
+        start + batchSize - 1,
+        false,
+      );
+
+      if (jobs.length === 0) {
+        break;
+      }
+
+      let skippedInBatch = 0;
+
+      for (const job of jobs) {
+        if (filter?.name || filter?.failedReason) {
+          const dlqMeta = (job.data as Record<string, unknown>)?._dlqMeta as
+            | DeadLetterMetadata
+            | undefined;
+
+          if (filter.name && job.name !== filter.name) {
+            skippedInBatch++;
+            continue;
+          }
+          if (
+            filter.failedReason &&
+            !(dlqMeta?.failedReason ?? '')
+              .toLowerCase()
+              .includes(filter.failedReason.toLowerCase())
+          ) {
+            skippedInBatch++;
+            continue;
+          }
+        }
+
+        await job.remove();
+        purged++;
+      }
+
+      start += skippedInBatch;
+
+      if (jobs.length < batchSize) {
+        break;
+      }
+    }
+
+    return purged;
   }
 
   /**
