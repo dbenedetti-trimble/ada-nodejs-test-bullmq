@@ -1115,6 +1115,10 @@ export class Queue<
   /**
    * Replays all dead-lettered jobs matching the optional filter back to
    * their original source queues. Returns the count of replayed jobs.
+   *
+   * Note: This method loads all waiting jobs into memory for filtering.
+   * For DLQs with thousands of jobs, consider processing in batches
+   * using getDeadLetterJobs() with pagination and replayDeadLetter().
    */
   async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
     let replayed = 0;

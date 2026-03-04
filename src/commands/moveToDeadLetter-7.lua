@@ -1,6 +1,10 @@
 --[[
   Moves a job from the source queue's active list to a dead letter queue.
 
+  IMPORTANT: In Redis Cluster mode, the source queue and DLQ queue must use the
+  same hash tag (e.g., {payments} in queue names) to ensure all keys hash to
+  the same slot. Cross-slot keys will cause CROSSSLOT errors.
+
   Input:
     KEYS[1] source active key
     KEYS[2] source job hash key
@@ -94,7 +98,6 @@ for i = 1, #jobData, 2 do
 end
 
 local atm = tonumber(attemptsMade) or 0
-atm = atm + 1
 
 local dlqMeta = cjson.encode({
   sourceQueue = ARGV[7],
@@ -136,9 +139,6 @@ rcall("XADD", sourceEventsKey, "*", "event", "failed", "jobId", jobId,
 
 rcall("XADD", sourceEventsKey, "*", "event", "deadLettered", "jobId", jobId,
   "queue", ARGV[7], "deadLetterQueue", ARGV[3], "failedReason", ARGV[4])
-
-rcall("HINCRBY", jobIdKey, "atm", 1)
-rcall("HSET", jobIdKey, "failedReason", ARGV[4], "finishedOn", ARGV[5])
 
 rcall("DEL", jobIdKey, jobIdKey .. ':logs',
   jobIdKey .. ':dependencies', jobIdKey .. ':processed',

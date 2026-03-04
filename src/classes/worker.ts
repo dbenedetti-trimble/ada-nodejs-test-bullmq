@@ -282,9 +282,20 @@ export class Worker<
       (typeof this.opts.deadLetterQueue?.queueName !== 'string' ||
         !this.opts.deadLetterQueue.queueName.trim())
     ) {
-      throw new Error(
-        'deadLetterQueue.queueName must be a non-empty string',
-      );
+      throw new Error('deadLetterQueue.queueName must be a non-empty string');
+    }
+
+    if (this.opts.deadLetterQueue?.queueName) {
+      const srcTag = (name.match(/\{([^}]+)\}/) || [])[1];
+      const dlqTag = (this.opts.deadLetterQueue.queueName.match(
+        /\{([^}]+)\}/,
+      ) || [])[1];
+      if (srcTag !== dlqTag) {
+        console.warn(
+          `BullMQ: source queue "${name}" and deadLetterQueue "${this.opts.deadLetterQueue.queueName}" ` +
+            'have different hash tags. This will cause CROSSSLOT errors in Redis Cluster mode.',
+        );
+      }
     }
 
     this.concurrency = this.opts.concurrency;
@@ -1154,14 +1165,8 @@ will never work with more accuracy than 1ms. */
 
       this.emit('failed', job, err, 'active');
 
-      if (this.opts.deadLetterQueue?.queueName) {
-        const isTerminalFailure =
-          job.attemptsMade >= (job.opts?.attempts || 0) ||
-          err instanceof UnrecoverableError ||
-          err.name === 'UnrecoverableError';
-        if (isTerminalFailure) {
-          this.emit('deadLettered', job, err, 'active');
-        }
+      if (job.deadLettered) {
+        this.emit('deadLettered', job, err, 'active');
       }
 
       span?.addEvent('job failed', {

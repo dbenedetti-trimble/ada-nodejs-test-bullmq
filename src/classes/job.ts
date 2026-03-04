@@ -133,6 +133,11 @@ export class Job<
   deferredFailure: string;
 
   /**
+   * Whether this job was routed to a dead letter queue on terminal failure.
+   */
+  deadLettered = false;
+
+  /**
    * Timestamp for when the job finished (completed or failed).
    */
   finishedOn?: number;
@@ -874,6 +879,7 @@ export class Job<
 
             await this.scripts.moveToDeadLetter(this.id, args);
             finishedOn = Date.now();
+            this.deadLettered = true;
 
             this.recordJobMetrics('failed');
           } else {
