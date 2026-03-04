@@ -1116,36 +1116,61 @@ export class Queue<
    * Replays all dead-lettered jobs matching the optional filter back to
    * their original source queues. Returns the count of replayed jobs.
    *
-   * Note: This method loads all waiting jobs into memory for filtering.
-   * For DLQs with thousands of jobs, consider processing in batches
-   * using getDeadLetterJobs() with pagination and replayDeadLetter().
+   * Jobs are fetched in batches to avoid loading the entire DLQ into memory.
    */
   async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    const batchSize = 100;
     let replayed = 0;
-    const jobs = await this.getJobs(['waiting'], 0, -1, false);
+    let start = 0;
 
-    for (const job of jobs) {
-      const dlqMeta = (job.data as Record<string, unknown>)?._dlqMeta as
-        | DeadLetterMetadata
-        | undefined;
-      if (!dlqMeta) {
-        continue;
+    for (;;) {
+      const jobs = await this.getJobs(
+        ['waiting'],
+        start,
+        start + batchSize - 1,
+        false,
+      );
+
+      if (jobs.length === 0) {
+        break;
       }
 
-      if (filter?.name && job.name !== filter.name) {
-        continue;
-      }
-      if (
-        filter?.failedReason &&
-        !(dlqMeta.failedReason ?? '')
-          .toLowerCase()
-          .includes(filter.failedReason.toLowerCase())
-      ) {
-        continue;
+      let skippedInBatch = 0;
+
+      for (const job of jobs) {
+        const dlqMeta = (job.data as Record<string, unknown>)?._dlqMeta as
+          | DeadLetterMetadata
+          | undefined;
+        if (!dlqMeta) {
+          skippedInBatch++;
+          continue;
+        }
+
+        if (filter?.name && job.name !== filter.name) {
+          skippedInBatch++;
+          continue;
+        }
+        if (
+          filter?.failedReason &&
+          !(dlqMeta.failedReason ?? '')
+            .toLowerCase()
+            .includes(filter.failedReason.toLowerCase())
+        ) {
+          skippedInBatch++;
+          continue;
+        }
+
+        await this.replayDeadLetter(job.id!);
+        replayed++;
       }
 
-      await this.replayDeadLetter(job.id!);
-      replayed++;
+      // Advance past skipped jobs; replayed jobs are removed from the list
+      // so they don't shift the offset — only skipped jobs remain.
+      start += skippedInBatch;
+
+      if (jobs.length < batchSize) {
+        break;
+      }
     }
 
     return replayed;
