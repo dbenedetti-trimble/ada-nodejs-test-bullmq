@@ -3,7 +3,11 @@ import { MinimalJob } from '../interfaces/minimal-job';
 import { BackoffStrategy } from '../types/backoff-strategy';
 
 export interface BuiltInStrategies {
-  [index: string]: (delay: number, jitter?: number) => BackoffStrategy;
+  [index: string]: (
+    delay: number,
+    jitter?: number,
+    opts?: BackoffOptions,
+  ) => BackoffStrategy;
 }
 
 export class Backoffs {
@@ -32,6 +36,36 @@ export class Backoffs {
         }
       };
     },
+
+    linear: function (delay: number, jitter = 0) {
+      return function (attemptsMade: number): number {
+        // TODO: implement in features pass
+        return 0;
+      };
+    },
+
+    polynomial: function (delay: number, jitter = 0, opts?: BackoffOptions) {
+      return function (attemptsMade: number): number {
+        // TODO: implement in features pass
+        return 0;
+      };
+    },
+
+    decorrelatedJitter: function (
+      delay: number,
+      _jitter = 0,
+      opts?: BackoffOptions,
+    ) {
+      return function (
+        attemptsMade: number,
+        _type?: string,
+        _err?: Error,
+        job?: MinimalJob,
+      ): number {
+        // TODO: implement in features pass
+        return 0;
+      };
+    },
   };
 
   static normalize(
@@ -57,7 +91,10 @@ export class Backoffs {
     if (backoff) {
       const strategy = lookupStrategy(backoff, customStrategy);
 
-      return strategy(attemptsMade, backoff.type, err, job);
+      const rawDelay = strategy(attemptsMade, backoff.type, err, job);
+
+      // TODO: apply maxDelay clamping in features pass
+      return rawDelay;
     }
   }
 }
@@ -70,6 +107,7 @@ function lookupStrategy(
     return Backoffs.builtinStrategies[backoff.type](
       backoff.delay!,
       backoff.jitter,
+      backoff,
     );
   } else if (customStrategy) {
     return customStrategy;

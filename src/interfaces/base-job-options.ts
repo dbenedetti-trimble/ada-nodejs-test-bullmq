@@ -3,6 +3,8 @@ import { KeepJobs } from '../types/keep-jobs';
 import { ParentOptions } from './parent-options';
 import { RepeatOptions } from './repeat-options';
 
+export type ErrorBackoffs = Record<string, BackoffOptions>;
+
 export interface DefaultJobOptions {
   /**
    * Timestamp when the job was created.
@@ -76,6 +78,13 @@ export interface DefaultJobOptions {
    * Limits the size in bytes of the job's data payload (as a JSON serialized string).
    */
   sizeLimit?: number;
+
+  /**
+   * Per-error-type backoff configuration. Maps error names to specific
+   * backoff options. When a job fails and the error's `name` matches a key,
+   * that backoff config is used instead of the default `backoff` option.
+   */
+  errorBackoffs?: ErrorBackoffs;
 }
 
 export interface BaseJobOptions extends DefaultJobOptions {

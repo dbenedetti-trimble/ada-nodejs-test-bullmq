@@ -40,7 +40,8 @@ import {
   WaitingError,
   UnrecoverableError,
 } from './errors';
-import { SpanKind, TelemetryAttributes } from '../enums';
+import { CircuitBreakerState, SpanKind, TelemetryAttributes } from '../enums';
+import { CircuitBreaker } from './circuit-breaker';
 import { JobScheduler } from './job-scheduler';
 import { LockManager } from './lock-manager';
 
@@ -171,6 +172,33 @@ export interface WorkerListener<
    * This event is triggered when locks are successfully renewed.
    */
   locksRenewed: (data: { count: number; jobIds: string[] }) => void;
+
+  /**
+   * Listen to 'circuit:open' event.
+   *
+   * This event is triggered when the circuit breaker transitions to the OPEN state
+   * after reaching the failure threshold.
+   */
+  'circuit:open': (payload: {
+    failures: number;
+    threshold: number;
+  }) => void;
+
+  /**
+   * Listen to 'circuit:half-open' event.
+   *
+   * This event is triggered when the circuit breaker transitions to the HALF_OPEN state
+   * after the duration cooldown expires.
+   */
+  'circuit:half-open': (payload: { duration: number }) => void;
+
+  /**
+   * Listen to 'circuit:closed' event.
+   *
+   * This event is triggered when the circuit breaker transitions back to the CLOSED state
+   * after a successful test job in HALF_OPEN.
+   */
+  'circuit:closed': (payload: { testJobId: string }) => void;
 }
 
 /**
@@ -198,6 +226,7 @@ export class Worker<
   protected lockManager: LockManager;
   private processorAcceptsSignal = false;
 
+  private circuitBreaker?: CircuitBreaker;
   private stalledCheckStopper?: () => void;
   private waiting: Promise<number> | null = null;
   private _repeat: Repeat; // To be deprecated in v6 in favor of Job Scheduler
@@ -271,6 +300,10 @@ export class Worker<
       this.opts.lockRenewTime || this.opts.lockDuration / 2;
 
     this.id = v4();
+
+    if (this.opts.circuitBreaker) {
+      this.circuitBreaker = new CircuitBreaker(this.opts.circuitBreaker);
+    }
 
     this.createLockManager();
 
@@ -498,6 +531,14 @@ export class Worker<
 
   get concurrency() {
     return this._concurrency;
+  }
+
+  /**
+   * Returns the current circuit breaker state, or `undefined` if
+   * the circuit breaker is not configured.
+   */
+  getCircuitBreakerState(): CircuitBreakerState | undefined {
+    return this.circuitBreaker?.getState();
   }
 
   get repeat(): Promise<Repeat> {
@@ -1247,6 +1288,7 @@ will never work with more accuracy than 1ms. */
             [TelemetryAttributes.WorkerForceClose]: force,
           });
           this.emit('closing', 'closing queue');
+          this.circuitBreaker?.close();
           this.abortDelayController?.abort();
 
           // Define the async cleanup functions
