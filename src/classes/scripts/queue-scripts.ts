@@ -25,8 +25,8 @@ export class QueueScripts {
       dst = 'wait';
     }
 
-    const keys = [src, dst, 'meta', 'prioritized'].map(
-      (name: string) => this.ctx.toKey(name),
+    const keys = [src, dst, 'meta', 'prioritized'].map((name: string) =>
+      this.ctx.toKey(name),
     );
 
     keys.push(
@@ -63,15 +63,10 @@ export class QueueScripts {
     return keys.concat(args);
   }
 
-  async obliterate(
-    opts: { force: boolean; count: number },
-  ): Promise<number> {
+  async obliterate(opts: { force: boolean; count: number }): Promise<number> {
     const client = await this.ctx.client;
 
-    const keys: (string | number)[] = [
-      this.ctx.keys.meta,
-      this.ctx.toKey(''),
-    ];
+    const keys: (string | number)[] = [this.ctx.keys.meta, this.ctx.toKey('')];
     const args = [opts.count, opts.force ? 'force' : null];
 
     const result = await this.ctx.execCommand(
@@ -84,9 +79,7 @@ export class QueueScripts {
         case -1:
           throw new Error('Cannot obliterate non-paused queue');
         case -2:
-          throw new Error(
-            'Cannot obliterate queue with active jobs',
-          );
+          throw new Error('Cannot obliterate queue with active jobs');
       }
     }
     return result;
@@ -117,12 +110,7 @@ export class QueueScripts {
 
     const keys: (string | number)[] = [queueKeys['']];
 
-    const args = [
-      start,
-      end,
-      asc ? '1' : '0',
-      ...transformedTypes,
-    ];
+    const args = [start, end, asc ? '1' : '0', ...transformedTypes];
 
     return keys.concat(args);
   }
@@ -147,9 +135,7 @@ export class QueueScripts {
     return keys.concat(args);
   }
 
-  public getCountsPerPriorityArgs(
-    priorities: number[],
-  ): (string | number)[] {
+  private getCountsPerPriorityArgs(priorities: number[]): (string | number)[] {
     const keys: (string | number)[] = [
       this.ctx.keys.wait,
       this.ctx.keys.paused,
@@ -162,17 +148,11 @@ export class QueueScripts {
     return keys.concat(args);
   }
 
-  async getCountsPerPriority(
-    priorities: number[],
-  ): Promise<number[]> {
+  async getCountsPerPriority(priorities: number[]): Promise<number[]> {
     const client = await this.ctx.client;
     const args = this.getCountsPerPriorityArgs(priorities);
 
-    return await this.ctx.execCommand(
-      client,
-      'getCountsPerPriority',
-      args,
-    );
+    return await this.ctx.execCommand(client, 'getCountsPerPriority', args);
   }
 
   getRateLimitTtlArgs(maxJobs?: number): (string | number)[] {
@@ -202,11 +182,7 @@ export class QueueScripts {
     const client = await this.ctx.client;
 
     const args = this.isMaxedArgs();
-    return !!(await this.ctx.execCommand(
-      client,
-      'isMaxed',
-      args,
-    ));
+    return !!(await this.ctx.execCommand(client, 'isMaxed', args));
   }
 
   async cleanJobsInSet(
@@ -242,8 +218,7 @@ export class QueueScripts {
 
     const maxIterations = 5;
 
-    const pageSize =
-      opts.end >= 0 ? opts.end - opts.start + 1 : Infinity;
+    const pageSize = opts.end >= 0 ? opts.end - opts.start + 1 : Infinity;
 
     let cursor = '0',
       offset = 0,
@@ -265,12 +240,11 @@ export class QueueScripts {
         args.push(1);
       }
 
-      [cursor, offset, items, total, rawJobs] =
-        await this.ctx.execCommand(
-          client,
-          'paginate',
-          keys.concat(args),
-        );
+      [cursor, offset, items, total, rawJobs] = await this.ctx.execCommand(
+        client,
+        'paginate',
+        keys.concat(args),
+      );
 
       page = page.concat(items);
 
@@ -308,10 +282,7 @@ export class QueueScripts {
     }
   }
 
-  async moveJobFromActiveToWait(
-    jobId: string,
-    token = '0',
-  ): Promise<any> {
+  async moveJobFromActiveToWait(jobId: string, token = '0'): Promise<any> {
     const client = await this.ctx.client;
 
     const keys: (string | number)[] = [

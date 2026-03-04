@@ -93,10 +93,7 @@ export class Scripts {
     return (<any>client)[commandNameWithVersion](args);
   }
 
-  async isJobInList(
-    listKey: string,
-    jobId: string,
-  ): Promise<boolean> {
+  async isJobInList(listKey: string, jobId: string): Promise<boolean> {
     return isJobInListUtil(this.ctx, listKey, jobId);
   }
 
@@ -109,9 +106,7 @@ export class Scripts {
     jobId: string,
     parentKeyOpts: ParentKeyOpts = {},
   ): Promise<string> {
-    return this.jobScripts.addJob(
-      client, job, opts, jobId, parentKeyOpts,
-    );
+    return this.jobScripts.addJob(client, job, opts, jobId, parentKeyOpts);
   }
 
   protected addStandardJob(
@@ -120,9 +115,7 @@ export class Scripts {
     encodedOpts: any,
     args: (string | number | Record<string, any>)[],
   ): Promise<string | number> {
-    return this.jobScripts.addStandardJob(
-      client, job, encodedOpts, args,
-    );
+    return this.jobScripts.addStandardJob(client, job, encodedOpts, args);
   }
 
   protected addStandardJobArgs(
@@ -130,9 +123,7 @@ export class Scripts {
     encodedOpts: any,
     args: (string | number | Record<string, any>)[],
   ): (string | Buffer)[] {
-    return this.jobScripts.addStandardJobArgs(
-      job, encodedOpts, args,
-    );
+    return this.jobScripts.addStandardJobArgs(job, encodedOpts, args);
   }
 
   protected addDelayedJob(
@@ -141,9 +132,7 @@ export class Scripts {
     encodedOpts: any,
     args: (string | number | Record<string, any>)[],
   ): Promise<string | number> {
-    return this.jobScripts.addDelayedJob(
-      client, job, encodedOpts, args,
-    );
+    return this.jobScripts.addDelayedJob(client, job, encodedOpts, args);
   }
 
   protected addDelayedJobArgs(
@@ -151,9 +140,7 @@ export class Scripts {
     encodedOpts: any,
     args: (string | number | Record<string, any>)[],
   ): (string | Buffer)[] {
-    return this.jobScripts.addDelayedJobArgs(
-      job, encodedOpts, args,
-    );
+    return this.jobScripts.addDelayedJobArgs(job, encodedOpts, args);
   }
 
   protected addPrioritizedJob(
@@ -162,9 +149,7 @@ export class Scripts {
     encodedOpts: any,
     args: (string | number | Record<string, any>)[],
   ): Promise<string | number> {
-    return this.jobScripts.addPrioritizedJob(
-      client, job, encodedOpts, args,
-    );
+    return this.jobScripts.addPrioritizedJob(client, job, encodedOpts, args);
   }
 
   protected addPrioritizedJobArgs(
@@ -172,9 +157,7 @@ export class Scripts {
     encodedOpts: any,
     args: (string | number | Record<string, any>)[],
   ): (string | Buffer)[] {
-    return this.jobScripts.addPrioritizedJobArgs(
-      job, encodedOpts, args,
-    );
+    return this.jobScripts.addPrioritizedJobArgs(job, encodedOpts, args);
   }
 
   protected addParentJob(
@@ -183,9 +166,7 @@ export class Scripts {
     encodedOpts: any,
     args: (string | number | Record<string, any>)[],
   ): Promise<string | number> {
-    return this.jobScripts.addParentJob(
-      client, job, encodedOpts, args,
-    );
+    return this.jobScripts.addParentJob(client, job, encodedOpts, args);
   }
 
   protected addParentJobArgs(
@@ -193,15 +174,10 @@ export class Scripts {
     encodedOpts: any,
     args: (string | number | Record<string, any>)[],
   ): (string | Buffer)[] {
-    return this.jobScripts.addParentJobArgs(
-      job, encodedOpts, args,
-    );
+    return this.jobScripts.addParentJobArgs(job, encodedOpts, args);
   }
 
-  async remove(
-    jobId: string,
-    removeChildren: boolean,
-  ): Promise<number> {
+  async remove(jobId: string, removeChildren: boolean): Promise<number> {
     return this.jobScripts.remove(jobId, removeChildren);
   }
 
@@ -216,10 +192,7 @@ export class Scripts {
     return this.jobScripts.updateData(job, data);
   }
 
-  async updateProgress(
-    jobId: string,
-    progress: JobProgress,
-  ): Promise<void> {
+  async updateProgress(jobId: string, progress: JobProgress): Promise<void> {
     return this.jobScripts.updateProgress(jobId, progress);
   }
 
@@ -259,9 +232,7 @@ export class Scripts {
     priority = 0,
     lifo = false,
   ): (string | number)[] {
-    return this.jobScripts.changePriorityArgs(
-      jobId, priority, lifo,
-    );
+    return this.jobScripts.changePriorityArgs(jobId, priority, lifo);
   }
 
   async retryJob(
@@ -298,9 +269,7 @@ export class Scripts {
     deduplicationId: string,
     jobId: string,
   ): Promise<number> {
-    return this.jobScripts.removeDeduplicationKey(
-      deduplicationId, jobId,
-    );
+    return this.jobScripts.removeDeduplicationKey(deduplicationId, jobId);
   }
 
   // --- Queue domain delegations ---
@@ -317,9 +286,7 @@ export class Scripts {
     return this.queueScripts.drain(delayed);
   }
 
-  async obliterate(
-    opts: { force: boolean; count: number },
-  ): Promise<number> {
+  async obliterate(opts: { force: boolean; count: number }): Promise<number> {
     return this.queueScripts.obliterate(opts);
   }
 
@@ -336,15 +303,7 @@ export class Scripts {
     return this.queueScripts.getCounts(types);
   }
 
-  protected getCountsPerPriorityArgs(
-    priorities: number[],
-  ): (string | number)[] {
-    return this.queueScripts.getCountsPerPriorityArgs(priorities);
-  }
-
-  async getCountsPerPriority(
-    priorities: number[],
-  ): Promise<number[]> {
+  async getCountsPerPriority(priorities: number[]): Promise<number[]> {
     return this.queueScripts.getCountsPerPriority(priorities);
   }
 
@@ -410,9 +369,7 @@ export class Scripts {
     token: string,
     opts?: MoveToWaitingChildrenOpts,
   ): (string | number)[] {
-    return this.flowScripts.moveToWaitingChildrenArgs(
-      jobId, token, opts,
-    );
+    return this.flowScripts.moveToWaitingChildrenArgs(jobId, token, opts);
   }
 
   async moveToWaitingChildren(
@@ -420,15 +377,10 @@ export class Scripts {
     token: string,
     opts: MoveToWaitingChildrenOpts = {},
   ): Promise<boolean> {
-    return this.flowScripts.moveToWaitingChildren(
-      jobId, token, opts,
-    );
+    return this.flowScripts.moveToWaitingChildren(jobId, token, opts);
   }
 
-  async getDependencyCounts(
-    jobId: string,
-    types: string[],
-  ): Promise<number[]> {
+  async getDependencyCounts(jobId: string, types: string[]): Promise<number[]> {
     return this.flowScripts.getDependencyCounts(jobId, types);
   }
 
@@ -441,7 +393,10 @@ export class Scripts {
     legacyCustomKey: string,
   ): Promise<string> {
     return this.schedulerScripts.addRepeatableJob(
-      customKey, nextMillis, opts, legacyCustomKey,
+      customKey,
+      nextMillis,
+      opts,
+      legacyCustomKey,
     );
   }
 
@@ -452,7 +407,10 @@ export class Scripts {
     legacyCustomKey: string,
   ): (string | number | Buffer)[] {
     return this.schedulerScripts.addRepeatableJobArgs(
-      customKey, nextMillis, opts, legacyCustomKey,
+      customKey,
+      nextMillis,
+      opts,
+      legacyCustomKey,
     );
   }
 
@@ -463,7 +421,10 @@ export class Scripts {
     legacyCustomKey: string,
   ): Promise<string> {
     return this.schedulerScripts.updateRepeatableJobMillis(
-      client, customKey, nextMillis, legacyCustomKey,
+      client,
+      customKey,
+      nextMillis,
+      legacyCustomKey,
     );
   }
 
@@ -473,7 +434,9 @@ export class Scripts {
     repeatJobKey: string,
   ): Promise<number> {
     return this.schedulerScripts.removeRepeatable(
-      legacyRepeatJobId, repeatConcatOptions, repeatJobKey,
+      legacyRepeatJobId,
+      repeatConcatOptions,
+      repeatJobKey,
     );
   }
 
@@ -482,7 +445,8 @@ export class Scripts {
     repeatJobKey: string,
   ): string {
     return this.schedulerScripts.getRepeatConcatOptions(
-      repeatConcatOptions, repeatJobKey,
+      repeatConcatOptions,
+      repeatJobKey,
     );
   }
 
@@ -522,9 +486,7 @@ export class Scripts {
     );
   }
 
-  async removeJobScheduler(
-    jobSchedulerId: string,
-  ): Promise<number> {
+  async removeJobScheduler(jobSchedulerId: string): Promise<number> {
     return this.schedulerScripts.removeJobScheduler(jobSchedulerId);
   }
 
@@ -532,9 +494,7 @@ export class Scripts {
     return this.schedulerScripts.getJobSchedulerArgs(id);
   }
 
-  async getJobScheduler(
-    id: string,
-  ): Promise<[any, string | null]> {
+  async getJobScheduler(id: string): Promise<[any, string | null]> {
     return this.schedulerScripts.getJobScheduler(id);
   }
 
@@ -546,9 +506,7 @@ export class Scripts {
     duration: number,
     client?: RedisClient | ChainableCommander,
   ): Promise<number> {
-    return this.workerScripts.extendLock(
-      jobId, token, duration, client,
-    );
+    return this.workerScripts.extendLock(jobId, token, duration, client);
   }
 
   async extendLocks(
@@ -556,16 +514,10 @@ export class Scripts {
     tokens: string[],
     duration: number,
   ): Promise<string[]> {
-    return this.workerScripts.extendLocks(
-      jobIds, tokens, duration,
-    );
+    return this.workerScripts.extendLocks(jobIds, tokens, duration);
   }
 
-  async moveToActive(
-    client: RedisClient,
-    token: string,
-    name?: string,
-  ) {
+  async moveToActive(client: RedisClient, token: string, name?: string) {
     return this.workerScripts.moveToActive(client, token, name);
   }
 
@@ -576,11 +528,7 @@ export class Scripts {
     return this.workerScripts.moveToFinished(jobId, args);
   }
 
-  protected moveToFinishedArgs<
-    T = any,
-    R = any,
-    N extends string = string,
-  >(
+  protected moveToFinishedArgs<T = any, R = any, N extends string = string>(
     job: MinimalJob<T, R, N>,
     val: any,
     propVal: FinishedPropValAttribute,
@@ -604,7 +552,7 @@ export class Scripts {
     );
   }
 
-  moveToCompletedArgs<T = any, R = any, N extends string = string>(
+  protected moveToCompletedArgs<T = any, R = any, N extends string = string>(
     job: MinimalJob<T, R, N>,
     returnvalue: R,
     removeOnComplete: boolean | number | KeepJobs,
@@ -612,11 +560,15 @@ export class Scripts {
     fetchNext = false,
   ): (string | number | boolean | Buffer)[] {
     return this.workerScripts.moveToCompletedArgs(
-      job, returnvalue, removeOnComplete, token, fetchNext,
+      job,
+      returnvalue,
+      removeOnComplete,
+      token,
+      fetchNext,
     );
   }
 
-  moveToFailedArgs<T = any, R = any, N extends string = string>(
+  protected moveToFailedArgs<T = any, R = any, N extends string = string>(
     job: MinimalJob<T, R, N>,
     failedReason: string,
     removeOnFailed: boolean | number | KeepJobs,
@@ -642,7 +594,11 @@ export class Scripts {
     opts: MoveToDelayedOpts = {},
   ): (string | number | Buffer)[] {
     return this.workerScripts.moveToDelayedArgs(
-      jobId, timestamp, token, delay, opts,
+      jobId,
+      timestamp,
+      token,
+      delay,
+      opts,
     );
   }
 
@@ -654,7 +610,11 @@ export class Scripts {
     opts: MoveToDelayedOpts = {},
   ): Promise<void> {
     return this.workerScripts.moveToDelayed(
-      jobId, timestamp, delay, token, opts,
+      jobId,
+      timestamp,
+      delay,
+      token,
+      opts,
     );
   }
 
@@ -671,9 +631,7 @@ export class Scripts {
     count: number,
     timestamp: number,
   ): (string | number)[] {
-    return this.workerScripts.moveJobsToWaitArgs(
-      state, count, timestamp,
-    );
+    return this.workerScripts.moveJobsToWaitArgs(state, count, timestamp);
   }
 
   async retryJobs(

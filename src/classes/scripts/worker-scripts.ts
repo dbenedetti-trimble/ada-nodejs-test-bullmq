@@ -82,11 +82,7 @@ export class WorkerScripts {
     return this.ctx.execCommand(client, 'extendLocks', args);
   }
 
-  async moveToActive(
-    client: RedisClient,
-    token: string,
-    name?: string,
-  ) {
+  async moveToActive(client: RedisClient, token: string, name?: string) {
     const opts = this.ctx.opts as WorkerOptions;
 
     const queueKeys = this.ctx.keys;
@@ -130,11 +126,7 @@ export class WorkerScripts {
   ) {
     const client = await this.ctx.client;
 
-    const result = await this.ctx.execCommand(
-      client,
-      'moveToFinished',
-      args,
-    );
+    const result = await this.ctx.execCommand(client, 'moveToFinished', args);
     if (result < 0) {
       throw finishedErrors({
         code: result,
@@ -149,11 +141,7 @@ export class WorkerScripts {
     }
   }
 
-  public moveToFinishedArgs<
-    T = any,
-    R = any,
-    N extends string = string,
-  >(
+  public moveToFinishedArgs<T = any, R = any, N extends string = string>(
     job: MinimalJob<T, R, N>,
     val: any,
     propVal: FinishedPropValAttribute,
@@ -167,9 +155,7 @@ export class WorkerScripts {
     const queueKeys = this.ctx.keys;
     const opts: WorkerOptions = <WorkerOptions>this.ctx.opts;
     const workerKeepJobs =
-      target === 'completed'
-        ? opts.removeOnComplete
-        : opts.removeOnFail;
+      target === 'completed' ? opts.removeOnComplete : opts.removeOnFail;
 
     const metricsKey = this.ctx.toKey(`metrics:${target}`);
 
@@ -204,15 +190,13 @@ export class WorkerScripts {
         idof: !!job.opts?.ignoreDependencyOnFailure,
         rdof: !!job.opts?.removeDependencyOnFailure,
       }),
-      fieldsToUpdate
-        ? pack(objectToFlatArray(fieldsToUpdate))
-        : void 0,
+      fieldsToUpdate ? pack(objectToFlatArray(fieldsToUpdate)) : void 0,
     ];
 
     return keys.concat(args);
   }
 
-  moveToCompletedArgs<T = any, R = any, N extends string = string>(
+  public moveToCompletedArgs<T = any, R = any, N extends string = string>(
     job: MinimalJob<T, R, N>,
     returnvalue: R,
     removeOnComplete: boolean | number | KeepJobs,
@@ -232,7 +216,7 @@ export class WorkerScripts {
     );
   }
 
-  moveToFailedArgs<T = any, R = any, N extends string = string>(
+  public moveToFailedArgs<T = any, R = any, N extends string = string>(
     job: MinimalJob<T, R, N>,
     failedReason: string,
     removeOnFailed: boolean | number | KeepJobs,
@@ -296,19 +280,9 @@ export class WorkerScripts {
   ): Promise<void> {
     const client = await this.ctx.client;
 
-    const args = this.moveToDelayedArgs(
-      jobId,
-      timestamp,
-      token,
-      delay,
-      opts,
-    );
+    const args = this.moveToDelayedArgs(jobId, timestamp, token, delay, opts);
 
-    const result = await this.ctx.execCommand(
-      client,
-      'moveToDelayed',
-      args,
-    );
+    const result = await this.ctx.execCommand(client, 'moveToDelayed', args);
     if (result < 0) {
       throw finishedErrors({
         code: result,
@@ -346,11 +320,7 @@ export class WorkerScripts {
 
     const args = this.moveStalledJobsToWaitArgs();
 
-    return this.ctx.execCommand(
-      client,
-      'moveStalledJobsToWait',
-      args,
-    );
+    return this.ctx.execCommand(client, 'moveStalledJobsToWait', args);
   }
 
   public moveJobsToWaitArgs(
@@ -381,11 +351,7 @@ export class WorkerScripts {
   ): Promise<number> {
     const client = await this.ctx.client;
 
-    const args = this.moveJobsToWaitArgs(
-      state,
-      count,
-      timestamp,
-    );
+    const args = this.moveJobsToWaitArgs(state, count, timestamp);
 
     return this.ctx.execCommand(client, 'moveJobsToWait', args);
   }
@@ -393,11 +359,7 @@ export class WorkerScripts {
   async promoteJobs(count = 1000): Promise<number> {
     const client = await this.ctx.client;
 
-    const args = this.moveJobsToWaitArgs(
-      'delayed',
-      count,
-      Number.MAX_VALUE,
-    );
+    const args = this.moveJobsToWaitArgs('delayed', count, Number.MAX_VALUE);
 
     return this.ctx.execCommand(client, 'moveJobsToWait', args);
   }
