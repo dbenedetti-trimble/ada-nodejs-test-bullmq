@@ -6,13 +6,11 @@ import {
   JobJson,
   JobJsonRaw,
   LifecycleEvent,
-  LifecycleLogger,
   MinimalJob,
   MinimalQueue,
   MoveToWaitingChildrenOpts,
   ParentKeys,
   ParentKeyOpts,
-  QueueBaseOptions,
   RedisClient,
   RetryOptions,
   WorkerOptions,
@@ -1533,22 +1531,16 @@ export class Job<
       data?: Record<string, unknown>;
     } = {},
   ): void {
-    const opts = this.queue.opts as QueueBaseOptions;
-    const logger: LifecycleLogger | undefined = opts.logger;
-    if (!logger) {
-      return;
+    if (this.queue.shouldLog(event)) {
+      this.queue.logger![level]({
+        timestamp: Date.now(),
+        event,
+        queue: this.queue.name,
+        jobId: this.id,
+        jobName: this.name,
+        ...extra,
+      });
     }
-    if (opts.logEvents && !opts.logEvents.includes(event)) {
-      return;
-    }
-    logger[level]({
-      timestamp: Date.now(),
-      event,
-      queue: this.queue.name,
-      jobId: this.id,
-      jobName: this.name,
-      ...extra,
-    });
   }
 
   private async isInZSet(set: string): Promise<boolean> {

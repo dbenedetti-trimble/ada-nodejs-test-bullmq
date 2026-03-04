@@ -1,4 +1,5 @@
 import { RedisClient } from './connection';
+import { LifecycleEvent, LifecycleLogger } from './lifecycle-logger';
 import { Span } from './telemetry';
 import { SpanKind } from '../enums/telemetry-attributes';
 import { ScriptQueueContext } from './script-queue-context';
@@ -6,6 +7,19 @@ import { ScriptQueueContext } from './script-queue-context';
 export interface MinimalQueue extends ScriptQueueContext {
   readonly name: string;
   readonly qualifiedName: string;
+
+  /**
+   * User-provided lifecycle logger instance, if configured.
+   */
+  logger?: LifecycleLogger;
+
+  /**
+   * Returns whether a given lifecycle event should be logged.
+   *
+   * @param event - the lifecycle event to check
+   */
+  shouldLog(event: LifecycleEvent): boolean;
+
   /**
    * Emits an event. Normally used by subclasses to emit events.
    *

@@ -39,7 +39,7 @@ export class QueueBase extends EventEmitter implements MinimalQueue {
   protected connection: RedisConnection;
   public readonly qualifiedName: string;
 
-  protected readonly logger?: LifecycleLogger;
+  readonly logger?: LifecycleLogger;
   private readonly logEventsSet?: Set<LifecycleEvent>;
 
   /**
@@ -230,7 +230,7 @@ export class QueueBase extends EventEmitter implements MinimalQueue {
     );
   }
 
-  protected shouldLog(event: LifecycleEvent): boolean {
+  shouldLog(event: LifecycleEvent): boolean {
     if (!this.logger) {
       return false;
     }
