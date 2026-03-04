@@ -240,6 +240,7 @@ describe('Dead Letter Queue', () => {
 
       const deadLetteredEventPromise = new Promise<{
         jobId: string;
+        queue: string;
         deadLetterQueue: string;
         failedReason: string;
       }>(resolve => {
@@ -252,6 +253,7 @@ describe('Dead Letter Queue', () => {
 
       const event = await deadLetteredEventPromise;
       expect(event.jobId).toBeDefined();
+      expect(event.queue).toBe(queueName);
       expect(event.deadLetterQueue).toBe(dlqQueueName);
       expect(event.failedReason).toBe('fail for dlq');
 
@@ -500,9 +502,9 @@ describe('Dead Letter Queue', () => {
     });
 
     it('should throw for non-existent job ID', async () => {
-      await expect(
-        dlqQueue.replayDeadLetter('nonexistent'),
-      ).rejects.toThrow('Dead letter job nonexistent not found');
+      await expect(dlqQueue.replayDeadLetter('nonexistent')).rejects.toThrow(
+        'Dead letter job nonexistent not found',
+      );
     });
 
     it('should throw if source queue cannot be determined', async () => {

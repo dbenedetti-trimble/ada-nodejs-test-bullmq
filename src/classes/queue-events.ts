@@ -54,14 +54,16 @@ export interface QueueEventsListener extends IoredisListener {
   cleaned: (args: { count: string }, id: string) => void;
 
   /**
-   * Listen to 'completed' event.
+   * Listen to 'deadLettered' event.
    *
-   * This event is triggered when a job has successfully completed its execution.
+   * This event is triggered when a job is moved to a dead letter queue
+   * after terminal failure (retries exhausted or UnrecoverableError).
    *
-   * @param args - An object containing details about the completed job.
-   *   - `jobId` - The unique identifier of the job that completed.
-   *   - `returnvalue` - The return value of the job, serialized as a string.
-   *   - `prev` - The previous state of the job before completion (e.g., 'active'), if applicable.
+   * @param args - An object containing details about the dead-lettered job.
+   *   - `jobId` - The unique identifier of the job that was dead-lettered.
+   *   - `queue` - The source queue name.
+   *   - `deadLetterQueue` - The target dead letter queue name.
+   *   - `failedReason` - The reason the job failed.
    * @param id - The identifier of the event.
    */
   deadLettered: (

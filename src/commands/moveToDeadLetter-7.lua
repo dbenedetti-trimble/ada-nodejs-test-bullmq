@@ -135,7 +135,7 @@ rcall("XADD", sourceEventsKey, "*", "event", "failed", "jobId", jobId,
   "failedReason", ARGV[4], "prev", "active")
 
 rcall("XADD", sourceEventsKey, "*", "event", "deadLettered", "jobId", jobId,
-  "deadLetterQueue", ARGV[3], "failedReason", ARGV[4])
+  "queue", ARGV[7], "deadLetterQueue", ARGV[3], "failedReason", ARGV[4])
 
 rcall("HINCRBY", jobIdKey, "atm", 1)
 rcall("HSET", jobIdKey, "failedReason", ARGV[4], "finishedOn", ARGV[5])
