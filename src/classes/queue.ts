@@ -3,6 +3,7 @@ import {
   BaseJobOptions,
   BulkJobOptions,
   DeadLetterFilter,
+  DeadLetterMetadata,
   IoredisListener,
   JobSchedulerJson,
   MinimalQueue,
@@ -37,8 +38,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -1092,11 +1094,11 @@ export class Queue<
       throw new Error(`Dead letter job ${jobId} not found`);
     }
 
-    const dlqMeta = (job.data as any)?._dlqMeta;
+    const dlqMeta = (job.data as Record<string, unknown>)?._dlqMeta as
+      | DeadLetterMetadata
+      | undefined;
     if (!dlqMeta?.sourceQueue) {
-      throw new Error(
-        `Dead letter job ${jobId} has no source queue metadata`,
-      );
+      throw new Error(`Dead letter job ${jobId} has no source queue metadata`);
     }
 
     const newJobId = v4();
@@ -1119,7 +1121,9 @@ export class Queue<
     const jobs = await this.getJobs(['waiting'], 0, -1, false);
 
     for (const job of jobs) {
-      const dlqMeta = (job.data as any)?._dlqMeta;
+      const dlqMeta = (job.data as Record<string, unknown>)?._dlqMeta as
+        | DeadLetterMetadata
+        | undefined;
       if (!dlqMeta) {
         continue;
       }

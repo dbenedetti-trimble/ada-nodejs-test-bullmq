@@ -20,6 +20,7 @@ import {
   MinimalJob,
   MoveToWaitingChildrenOpts,
   ParentKeyOpts,
+  QueueOptions,
   RedisClient,
   WorkerOptions,
   MoveToDelayedOpts,
@@ -1783,7 +1784,7 @@ export class Scripts {
     ];
 
     const sourceMaxEvents =
-      (this.queue.opts as any)?.streams?.events?.maxLen ?? 10000;
+      (this.queue.opts as QueueOptions)?.streams?.events?.maxLen ?? 10000;
     const dlqMaxEvents = sourceMaxEvents;
 
     const args: (string | number)[] = [
@@ -1839,11 +1840,10 @@ export class Scripts {
 
     const args = [jobId, newJobId, Date.now()];
 
-    const result = await this.execCommand(
-      client,
-      'replayFromDeadLetter',
-      [...keys, ...args],
-    );
+    const result = await this.execCommand(client, 'replayFromDeadLetter', [
+      ...keys,
+      ...args,
+    ]);
 
     if (typeof result === 'number' && result < 0) {
       throw this.finishedErrors({
@@ -1862,13 +1862,16 @@ export class Scripts {
 
     const keys: string[] = [queueKeys.wait, queueKeys.meta];
 
-    const args = [filter?.name ?? '', filter?.failedReason ?? '', queueKeys['']];
+    const args = [
+      filter?.name ?? '',
+      filter?.failedReason ?? '',
+      queueKeys[''],
+    ];
 
-    const result = await this.execCommand(
-      client,
-      'purgeDeadLetters',
-      [...keys, ...args],
-    );
+    const result = await this.execCommand(client, 'purgeDeadLetters', [
+      ...keys,
+      ...args,
+    ]);
 
     return result ?? 0;
   }

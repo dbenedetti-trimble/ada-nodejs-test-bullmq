@@ -16,7 +16,12 @@ import {
   UnrecoverableError,
   Worker,
 } from '../src/classes';
+import { DeadLetterMetadata } from '../src/interfaces';
 import { delay, removeAllQueueData } from '../src/utils';
+
+interface DlqJobData extends Record<string, unknown> {
+  _dlqMeta?: DeadLetterMetadata;
+}
 
 describe('Dead Letter Queue', () => {
   const redisHost = process.env.REDIS_HOST || 'localhost';
@@ -94,7 +99,7 @@ describe('Dead Letter Queue', () => {
       await queue.add('test', { foo: 'bar' }, { attempts: 1 });
 
       const failedJob = await failedPromise;
-      expect(failedJob).toBeDefined();
+      expect(failedJob.id).toEqual(expect.any(String));
 
       const failedCount = await queue.getJobCountByTypes('failed');
       expect(failedCount).toBe(1);
@@ -130,7 +135,7 @@ describe('Dead Letter Queue', () => {
       await queue.add('test', { key: 'value' }, { attempts: 3 });
 
       const dlqJob = await deadLetteredPromise;
-      expect(dlqJob).toBeDefined();
+      expect(dlqJob.id).toEqual(expect.any(String));
 
       await delay(200);
 
@@ -142,9 +147,10 @@ describe('Dead Letter Queue', () => {
 
       const dlqJobs = await dlqQueue.getDeadLetterJobs(0, 10);
       expect(dlqJobs.length).toBe(1);
-      expect((dlqJobs[0].data as any).key).toBe('value');
-      expect((dlqJobs[0].data as any)._dlqMeta).toBeDefined();
-      expect((dlqJobs[0].data as any)._dlqMeta.sourceQueue).toBe(queueName);
+      const dlqData = dlqJobs[0].data as DlqJobData;
+      expect(dlqData.key).toBe('value');
+      expect(dlqData._dlqMeta).not.toBeUndefined();
+      expect(dlqData._dlqMeta!.sourceQueue).toBe(queueName);
 
       await worker.close();
     });
@@ -172,7 +178,7 @@ describe('Dead Letter Queue', () => {
       await queue.add('test', { data: 1 }, { attempts: 5 });
 
       const dlqJob = await deadLetteredPromise;
-      expect(dlqJob).toBeDefined();
+      expect(dlqJob.id).toEqual(expect.any(String));
 
       await delay(200);
 
@@ -180,7 +186,7 @@ describe('Dead Letter Queue', () => {
       expect(dlqCount).toBe(1);
 
       const dlqJobs = await dlqQueue.getDeadLetterJobs();
-      expect((dlqJobs[0].data as any)._dlqMeta.attemptsMade).toBe(1);
+      expect((dlqJobs[0].data as DlqJobData)._dlqMeta!.attemptsMade).toBe(1);
 
       await worker.close();
     });
@@ -213,7 +219,7 @@ describe('Dead Letter Queue', () => {
       await queue.add('test', { data: 1 }, { attempts: 3 });
 
       const completedJob = await completedPromise;
-      expect(completedJob).toBeDefined();
+      expect(completedJob.id).toEqual(expect.any(String));
 
       const dlqCount = await dlqQueue.getDeadLetterCount();
       expect(dlqCount).toBe(0);
@@ -244,7 +250,7 @@ describe('Dead Letter Queue', () => {
         deadLetterQueue: string;
         failedReason: string;
       }>(resolve => {
-        queueEvents.on('deadLettered', (args: any) => {
+        queueEvents.on('deadLettered', args => {
           resolve(args);
         });
       });
@@ -252,7 +258,7 @@ describe('Dead Letter Queue', () => {
       await queue.add('test', { data: 1 }, { attempts: 1 });
 
       const event = await deadLetteredEventPromise;
-      expect(event.jobId).toBeDefined();
+      expect(event.jobId).toEqual(expect.any(String));
       expect(event.queue).toBe(queueName);
       expect(event.deadLetterQueue).toBe(dlqQueueName);
       expect(event.failedReason).toBe('fail for dlq');
@@ -293,10 +299,11 @@ describe('Dead Letter Queue', () => {
       const dlqJobs = await dlqQueue.getDeadLetterJobs();
       expect(dlqJobs.length).toBe(1);
 
-      const dlqData = dlqJobs[0].data as any;
+      const dlqData = dlqJobs[0].data as DlqJobData;
       expect(dlqData.orderId).toBe(123);
       expect(dlqData.email).toBe('test@test.com');
-      expect(dlqData._dlqMeta).toBeDefined();
+      expect(dlqData._dlqMeta).not.toBeUndefined();
+      expect(dlqData._dlqMeta!.sourceQueue).toBe(queueName);
 
       await worker.close();
     });
@@ -326,18 +333,20 @@ describe('Dead Letter Queue', () => {
       await delay(200);
 
       const dlqJobs = await dlqQueue.getDeadLetterJobs();
-      const meta = (dlqJobs[0].data as any)._dlqMeta;
+      const meta = (dlqJobs[0].data as DlqJobData)._dlqMeta!;
 
       expect(meta.sourceQueue).toBe(queueName);
       expect(meta.failedReason).toBe('Connection refused');
-      expect(Array.isArray(meta.stacktrace)).toBe(true);
+      expect(meta.stacktrace).toBeInstanceOf(Array);
       expect(meta.stacktrace.length).toBe(2);
       expect(meta.attemptsMade).toBe(2);
-      expect(typeof meta.deadLetteredAt).toBe('number');
+      expect(meta.deadLetteredAt).toEqual(expect.any(Number));
       expect(meta.deadLetteredAt).toBeGreaterThan(0);
-      expect(typeof meta.originalTimestamp).toBe('number');
-      expect(meta.originalOpts).toBeDefined();
-      expect(meta.originalJobId).toBeDefined();
+      expect(meta.originalTimestamp).toEqual(expect.any(Number));
+      expect(meta.originalOpts).toEqual(
+        expect.objectContaining({ attempts: 2 }),
+      );
+      expect(meta.originalJobId).toEqual(expect.any(String));
 
       await worker.close();
     });
@@ -429,9 +438,10 @@ describe('Dead Letter Queue', () => {
       const dlqJobs = await dlqQueue.getDeadLetterJobs();
       const job = await dlqQueue.peekDeadLetter(dlqJobs[0].id!);
 
-      expect(job).toBeDefined();
-      expect((job!.data as any)._dlqMeta).toBeDefined();
-      expect((job!.data as any)._dlqMeta.sourceQueue).toBe(queueName);
+      expect(job).not.toBeUndefined();
+      const peekedData = job!.data as DlqJobData;
+      expect(peekedData._dlqMeta).not.toBeUndefined();
+      expect(peekedData._dlqMeta!.sourceQueue).toBe(queueName);
     });
 
     it('should return undefined for non-existent job via peekDeadLetter()', async () => {
@@ -475,8 +485,7 @@ describe('Dead Letter Queue', () => {
       expect(dlqJobs.length).toBe(1);
 
       const newJobId = await dlqQueue.replayDeadLetter(dlqJobs[0].id!);
-      expect(newJobId).toBeDefined();
-      expect(typeof newJobId).toBe('string');
+      expect(newJobId).toEqual(expect.any(String));
 
       await delay(100);
 
@@ -484,9 +493,10 @@ describe('Dead Letter Queue', () => {
       expect(waitingCount).toBe(1);
 
       const replayedJob = await queue.getJob(newJobId);
-      expect(replayedJob).toBeDefined();
-      expect((replayedJob!.data as any).key).toBe('value');
-      expect((replayedJob!.data as any)._dlqMeta).toBeUndefined();
+      expect(replayedJob).not.toBeUndefined();
+      const replayedData = replayedJob!.data as DlqJobData;
+      expect(replayedData.key).toBe('value');
+      expect(replayedData._dlqMeta).toBeUndefined();
 
       const dlqCount = await dlqQueue.getDeadLetterCount();
       expect(dlqCount).toBe(0);
@@ -532,7 +542,7 @@ describe('Dead Letter Queue', () => {
 
   describe('DLQ-6: Bulk replay and purge', () => {
     async function addMultipleJobsToDLQ(
-      jobs: { name: string; data: any; error: string }[],
+      jobs: { name: string; data: Record<string, unknown>; error: string }[],
     ) {
       const errorMap = new Map<number, string>();
       jobs.forEach((j, i) => errorMap.set(i, j.error));
@@ -540,7 +550,7 @@ describe('Dead Letter Queue', () => {
       const worker = new Worker(
         queueName,
         async job => {
-          const idx = (job.data as any).idx;
+          const idx = (job.data as Record<string, unknown>).idx as number;
           throw new Error(errorMap.get(idx) || 'fail');
         },
         {
