@@ -428,17 +428,16 @@ describe('Circuit breaker', () => {
       const duration = 300;
       const halfOpenMaxAttempts = 2;
       let halfOpenProcessed = 0;
-      let failCount = 0;
+      let totalProcessed = 0;
 
       const worker = new Worker(
         queueName,
         async () => {
-          failCount++;
-          if (failCount <= threshold) {
-            throw new Error('fail');
+          totalProcessed++;
+          if (worker.getCircuitBreakerState() === 'half-open') {
+            halfOpenProcessed++;
           }
-          halfOpenProcessed++;
-          return 'recovered';
+          throw new Error('always fail');
         },
         {
           autorun: false,
@@ -453,32 +452,26 @@ describe('Circuit breaker', () => {
       );
       await worker.waitUntilReady();
 
-      for (let i = 0; i < threshold; i++) {
-        await queue.add('test', { idx: i });
+      for (let i = 0; i < threshold + halfOpenMaxAttempts + 3; i++) {
+        await queue.add('test', { idx: i }, { attempts: 1 });
       }
 
-      const halfOpenEvent = new Promise<void>(resolve => {
+      let halfOpenCount = 0;
+      const secondOpenEvent = new Promise<void>(resolve => {
         worker.on('circuit:half-open', () => {
-          resolve();
+          halfOpenCount++;
+        });
+        worker.on('circuit:open', () => {
+          if (halfOpenCount >= 1) {
+            resolve();
+          }
         });
       });
 
       worker.run();
-      await halfOpenEvent;
+      await secondOpenEvent;
 
-      for (let i = 0; i < 5; i++) {
-        await queue.add('test', { idx: `ho-${i}` });
-      }
-
-      const closedEvent = new Promise<void>(resolve => {
-        worker.on('circuit:closed', () => {
-          resolve();
-        });
-      });
-
-      await closedEvent;
-
-      expect(halfOpenProcessed).toBeLessThanOrEqual(halfOpenMaxAttempts);
+      expect(halfOpenProcessed).toBe(halfOpenMaxAttempts);
 
       await worker.close();
     });
