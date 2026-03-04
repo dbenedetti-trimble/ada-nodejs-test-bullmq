@@ -64,6 +64,16 @@ export interface QueueEventsListener extends IoredisListener {
    *   - `prev` - The previous state of the job before completion (e.g., 'active'), if applicable.
    * @param id - The identifier of the event.
    */
+  deadLettered: (
+    args: {
+      jobId: string;
+      queue: string;
+      deadLetterQueue: string;
+      failedReason: string;
+    },
+    id: string,
+  ) => void;
+
   completed: (
     args: { jobId: string; returnvalue: string; prev?: string },
     id: string,

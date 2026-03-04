@@ -2,6 +2,7 @@ import { v4 } from 'uuid';
 import {
   BaseJobOptions,
   BulkJobOptions,
+  DeadLetterFilter,
   IoredisListener,
   JobSchedulerJson,
   MinimalQueue,
@@ -1047,6 +1048,107 @@ export class Queue<
         return await client.xtrim(this.keys.events, 'MAXLEN', '~', maxLength);
       },
     );
+  }
+
+  /**
+   * Returns the count of jobs in this queue's waiting state,
+   * intended for use when this queue acts as a dead letter queue.
+   */
+  async getDeadLetterCount(): Promise<number> {
+    // TODO: Implement in features pass
+    return this.getJobCountByTypes('waiting');
+  }
+
+  /**
+   * Returns paginated DLQ jobs from this queue's waiting state.
+   * Newest first.
+   */
+  async getDeadLetterJobs(
+    start?: number,
+    end?: number,
+  ): Promise<Job<DataType, ResultType, NameType>[]> {
+    // TODO: Implement in features pass
+    return this.getJobs(['waiting'], start, end, false) as Promise<
+      Job<DataType, ResultType, NameType>[]
+    >;
+  }
+
+  /**
+   * Returns a specific DLQ job by ID, or undefined if not found.
+   */
+  async peekDeadLetter(
+    jobId: string,
+  ): Promise<Job<DataType, ResultType, NameType> | undefined> {
+    // TODO: Implement in features pass
+    return this.getJob(jobId) as Promise<
+      Job<DataType, ResultType, NameType> | undefined
+    >;
+  }
+
+  /**
+   * Replays a single dead-lettered job back to its original source queue.
+   * Returns the new job ID in the source queue.
+   */
+  async replayDeadLetter(jobId: string): Promise<string> {
+    // TODO: Implement in features pass
+    const job = await this.getJob(jobId);
+    if (!job) {
+      throw new Error(`Dead letter job ${jobId} not found`);
+    }
+
+    const dlqMeta = (job.data as any)?._dlqMeta;
+    if (!dlqMeta?.sourceQueue) {
+      throw new Error(
+        `Dead letter job ${jobId} has no source queue metadata`,
+      );
+    }
+
+    const newJobId = v4();
+    const sourceQueuePrefix = `${this.qualifiedName.split(this.name)[0]}${dlqMeta.sourceQueue}:`;
+
+    return this.scripts.replayFromDeadLetter(
+      jobId,
+      newJobId,
+      sourceQueuePrefix,
+    );
+  }
+
+  /**
+   * Replays all dead-lettered jobs matching the optional filter back to
+   * their original source queues. Returns the count of replayed jobs.
+   */
+  async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    // TODO: Implement in features pass
+    let replayed = 0;
+    const jobs = await this.getJobs(['waiting'], 0, -1, false);
+
+    for (const job of jobs) {
+      const dlqMeta = (job.data as any)?._dlqMeta;
+      if (!dlqMeta) continue;
+
+      if (filter?.name && job.name !== filter.name) continue;
+      if (
+        filter?.failedReason &&
+        !(dlqMeta.failedReason ?? '')
+          .toLowerCase()
+          .includes(filter.failedReason.toLowerCase())
+      )
+        continue;
+
+      await this.replayDeadLetter(job.id!);
+      replayed++;
+    }
+
+    return replayed;
+  }
+
+  /**
+   * Purges dead-lettered jobs matching the optional filter.
+   * Returns the count of removed jobs.
+   */
+  async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    // TODO: Implement in features pass
+    return this.scripts.purgeDeadLetters(filter);
   }
 
   /**

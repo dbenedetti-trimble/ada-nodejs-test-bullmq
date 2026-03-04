@@ -13,6 +13,7 @@ const packer = new Packr({
 const pack = packer.pack;
 
 import {
+  DeadLetterFilter,
   JobJson,
   JobJsonRaw,
   MinimalJob,
@@ -1754,6 +1755,113 @@ export class Scripts {
         jobs,
       };
     }
+  }
+
+  moveToDeadLetterArgs<T = any, R = any, N extends string = string>(
+    job: MinimalJob<T, R, N>,
+    failedReason: string,
+    dlqQueueName: string,
+    token: string,
+    removeOnFail: boolean | number | KeepJobs | undefined,
+    fieldsToUpdate?: Record<string, any>,
+  ): (string | number | boolean | Buffer)[] {
+    // TODO: Build keys and args for moveToDeadLetter-7 Lua script in features pass
+    const queueKeys = this.queue.keys;
+    const prefix = queueKeys[''];
+    const dlqPrefix = `${prefix}${dlqQueueName}:`;
+
+    const keys: string[] = [
+      queueKeys.active,
+      this.queue.toKey(job.id ?? ''),
+      queueKeys.events,
+      `${dlqPrefix}wait`,
+      `${dlqPrefix}${job.id}`,
+      `${dlqPrefix}events`,
+      `${dlqPrefix}meta`,
+    ];
+
+    const args = [
+      job.id ?? '',
+      dlqQueueName,
+      failedReason,
+      Date.now(),
+      token,
+    ];
+
+    return [...keys, ...args];
+  }
+
+  async moveToDeadLetter(
+    jobId: string,
+    args: (string | number | boolean | Buffer)[],
+  ): Promise<string | void> {
+    // TODO: Execute moveToDeadLetter Lua script in features pass
+    const client = await this.queue.client;
+
+    const result = await this.execCommand(client, 'moveToDeadLetter', args);
+    if (result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId,
+        command: 'moveToDeadLetter',
+        state: 'active',
+      });
+    }
+
+    return result;
+  }
+
+  async replayFromDeadLetter(
+    jobId: string,
+    newJobId: string,
+    sourceQueuePrefix: string,
+  ): Promise<string> {
+    // TODO: Execute replayFromDeadLetter Lua script in features pass
+    const client = await this.queue.client;
+    const queueKeys = this.queue.keys;
+
+    const keys: string[] = [
+      this.queue.toKey(jobId),
+      queueKeys.wait,
+      `${sourceQueuePrefix}wait`,
+      `${sourceQueuePrefix}${newJobId}`,
+    ];
+
+    const args = [jobId, newJobId, Date.now()];
+
+    const result = await this.execCommand(
+      client,
+      'replayFromDeadLetter',
+      [...keys, ...args],
+    );
+
+    if (result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId,
+        command: 'replayFromDeadLetter',
+      });
+    }
+
+    return result;
+  }
+
+  async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    // TODO: Execute purgeDeadLetters Lua script in features pass
+    const client = await this.queue.client;
+    const queueKeys = this.queue.keys;
+
+    const keys: string[] = [queueKeys.wait, queueKeys.meta];
+
+    const args = [filter?.name ?? '', filter?.failedReason ?? ''];
+
+    const result = await this.execCommand(
+      client,
+      'purgeDeadLetters',
+      [...keys, ...args],
+    );
+
+    return result ?? 0;
   }
 
   finishedErrors({
