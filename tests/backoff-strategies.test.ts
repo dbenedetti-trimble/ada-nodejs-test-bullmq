@@ -370,6 +370,52 @@ describe('Backoff strategies', () => {
       await worker.close();
     });
 
+    it('should persist previous delay state across job attempts', async () => {
+      const worker = new Worker(
+        queueName,
+        async () => {
+          throw new Error('error');
+        },
+        { autorun: false, connection, prefix },
+      );
+      await worker.waitUntilReady();
+
+      await queue.add(
+        'test',
+        { foo: 'bar' },
+        {
+          attempts: 4,
+          backoff: {
+            type: 'decorrelatedJitter',
+            delay: 1000,
+            maxDelay: 50000,
+          },
+        },
+      );
+
+      const done = new Promise<void>((resolve, reject) => {
+        worker.on('failed', async job => {
+          try {
+            if (job.attemptsMade >= 2 && job.attemptsMade < 4) {
+              const jobData = job.data as any;
+              expect(jobData.__bullmq_prevDelay).toBeDefined();
+              expect(typeof jobData.__bullmq_prevDelay).toBe('number');
+              expect(jobData.__bullmq_prevDelay).toBeGreaterThanOrEqual(1000);
+            }
+            if (job.attemptsMade >= 3) {
+              resolve();
+            }
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
+
+      worker.run();
+      await done;
+      await worker.close();
+    });
+
     it('should produce non-deterministic delays', async () => {
       const worker = new Worker(
         queueName,

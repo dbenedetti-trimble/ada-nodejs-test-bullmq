@@ -423,6 +423,66 @@ describe('Circuit breaker', () => {
       await worker.close();
     });
 
+    it('should limit jobs fetched in HALF_OPEN to halfOpenMaxAttempts', async () => {
+      const threshold = 2;
+      const duration = 300;
+      const halfOpenMaxAttempts = 2;
+      let halfOpenProcessed = 0;
+      let failCount = 0;
+
+      const worker = new Worker(
+        queueName,
+        async () => {
+          failCount++;
+          if (failCount <= threshold) {
+            throw new Error('fail');
+          }
+          halfOpenProcessed++;
+          return 'recovered';
+        },
+        {
+          autorun: false,
+          connection,
+          prefix,
+          circuitBreaker: {
+            threshold,
+            duration,
+            halfOpenMaxAttempts,
+          },
+        },
+      );
+      await worker.waitUntilReady();
+
+      for (let i = 0; i < threshold; i++) {
+        await queue.add('test', { idx: i });
+      }
+
+      const halfOpenEvent = new Promise<void>(resolve => {
+        worker.on('circuit:half-open', () => {
+          resolve();
+        });
+      });
+
+      worker.run();
+      await halfOpenEvent;
+
+      for (let i = 0; i < 5; i++) {
+        await queue.add('test', { idx: `ho-${i}` });
+      }
+
+      const closedEvent = new Promise<void>(resolve => {
+        worker.on('circuit:closed', () => {
+          resolve();
+        });
+      });
+
+      await closedEvent;
+
+      expect(halfOpenProcessed).toBeLessThanOrEqual(halfOpenMaxAttempts);
+
+      await worker.close();
+    });
+
     it('should resume normal fetching after closing circuit', async () => {
       const threshold = 2;
       const duration = 300;

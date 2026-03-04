@@ -77,14 +77,24 @@ export class Backoffs {
         _err?: Error,
         job?: MinimalJob,
       ): number {
-        const prevDelay = attemptsMade > 1 && job?.delay ? job.delay : delay;
+        const prevDelay =
+          attemptsMade > 1 &&
+          job?.data &&
+          typeof job.data === 'object' &&
+          (job.data as any).__bullmq_prevDelay
+            ? (job.data as any).__bullmq_prevDelay
+            : delay;
         const upper = prevDelay * 3;
         const computed = delay + Math.random() * (upper - delay);
         let result = Math.max(delay, computed);
         if (maxDelayCap > 0) {
           result = Math.min(maxDelayCap, result);
         }
-        return Math.round(result);
+        result = Math.round(result);
+        if (job && job.data && typeof job.data === 'object') {
+          (job.data as any).__bullmq_prevDelay = result;
+        }
+        return result;
       };
     },
   };

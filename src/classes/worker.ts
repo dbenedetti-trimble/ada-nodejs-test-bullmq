@@ -664,7 +664,7 @@ export class Worker<
         ) {
           this.drained = false;
           this.emit('circuit:half-open', {
-            duration: this.opts.circuitBreaker.duration,
+            duration: this.opts.circuitBreaker!.duration,
           });
         }
         if (this.closing || this.paused) {
@@ -677,7 +677,8 @@ export class Worker<
         !this.paused &&
         !this.waiting &&
         asyncFifoQueue.numTotal() < this._concurrency &&
-        !this.isRateLimited()
+        !this.isRateLimited() &&
+        (!this.circuitBreaker || this.circuitBreaker.shouldAllowJob())
       ) {
         const token = `${this.id}:${tokenPostfix++}`;
 
@@ -699,6 +700,10 @@ export class Worker<
         // We await here so that we fetch jobs in sequence, this is important to avoid unnecessary calls
         // to Redis in high concurrency scenarios.
         const job = await fetchedJob;
+
+        if (job) {
+          this.circuitBreaker?.recordJobDispatched();
+        }
 
         // No more jobs waiting but we have others that could start processing already
         if (!job && asyncFifoQueue.numTotal() > 1) {
@@ -1257,6 +1262,7 @@ will never work with more accuracy than 1ms. */
 
         if (!this.paused) {
           this.paused = true;
+          this.circuitBreaker?.interruptWait();
           if (!doNotWaitActive) {
             await this.whenCurrentJobsFinished();
           }

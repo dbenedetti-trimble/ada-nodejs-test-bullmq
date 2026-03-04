@@ -53,7 +53,19 @@ export class CircuitBreaker {
   }
 
   shouldAllowJob(): boolean {
-    return this.state !== CircuitBreakerState.OPEN;
+    if (this.state === CircuitBreakerState.OPEN) {
+      return false;
+    }
+    if (this.state === CircuitBreakerState.HALF_OPEN) {
+      return this.halfOpenAttempts < this.halfOpenMaxAttempts;
+    }
+    return true;
+  }
+
+  recordJobDispatched(): void {
+    if (this.state === CircuitBreakerState.HALF_OPEN) {
+      this.halfOpenAttempts++;
+    }
   }
 
   recordSuccess(jobId: string): CircuitBreakerTransition {
@@ -99,15 +111,19 @@ export class CircuitBreaker {
     });
   }
 
+  interruptWait(): void {
+    if (this.halfOpenResolve) {
+      this.halfOpenResolve();
+      this.halfOpenResolve = undefined;
+    }
+  }
+
   close(): void {
     if (this.durationTimer) {
       clearTimeout(this.durationTimer);
       this.durationTimer = undefined;
     }
-    if (this.halfOpenResolve) {
-      this.halfOpenResolve();
-      this.halfOpenResolve = undefined;
-    }
+    this.interruptWait();
   }
 
   private transitionToOpen(): CircuitBreakerTransition {
