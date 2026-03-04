@@ -1166,6 +1166,8 @@ will never work with more accuracy than 1ms. */
         const transition = this.circuitBreaker.recordSuccess(job.id);
         if (transition.transition === CircuitBreakerState.CLOSED) {
           this.emit('circuit:closed', transition.payload);
+        } else if (transition.transition === CircuitBreakerState.OPEN) {
+          this.emit('circuit:open', transition.payload);
         }
       }
 

@@ -25,6 +25,8 @@ export class CircuitBreaker {
   private state: CircuitBreakerState = CircuitBreakerState.CLOSED;
   private failureCount = 0;
   private halfOpenAttempts = 0;
+  private halfOpenCompleted = 0;
+  private halfOpenFailed = false;
   private durationTimer?: ReturnType<typeof setTimeout>;
   private halfOpenResolve?: () => void;
   private readonly halfOpenMaxAttempts: number;
@@ -70,13 +72,28 @@ export class CircuitBreaker {
 
   recordSuccess(jobId: string): CircuitBreakerTransition {
     if (this.state === CircuitBreakerState.HALF_OPEN) {
-      this.halfOpenAttempts = 0;
-      this.failureCount = 0;
-      this.state = CircuitBreakerState.CLOSED;
-      return {
-        transition: CircuitBreakerState.CLOSED,
-        payload: { testJobId: jobId },
-      };
+      this.halfOpenCompleted++;
+
+      if (this.halfOpenFailed) {
+        if (this.halfOpenCompleted >= this.halfOpenMaxAttempts) {
+          return this.transitionToOpen();
+        }
+        return {};
+      }
+
+      if (this.halfOpenCompleted >= this.halfOpenMaxAttempts) {
+        this.halfOpenAttempts = 0;
+        this.halfOpenCompleted = 0;
+        this.halfOpenFailed = false;
+        this.failureCount = 0;
+        this.state = CircuitBreakerState.CLOSED;
+        return {
+          transition: CircuitBreakerState.CLOSED,
+          payload: { testJobId: jobId },
+        };
+      }
+
+      return {};
     }
     this.failureCount = 0;
     return {};
@@ -84,9 +101,14 @@ export class CircuitBreaker {
 
   recordFailure(): CircuitBreakerTransition {
     if (this.state === CircuitBreakerState.HALF_OPEN) {
-      this.halfOpenAttempts = 0;
-      this.failureCount = 1;
-      return this.transitionToOpen();
+      this.halfOpenCompleted++;
+      this.halfOpenFailed = true;
+
+      if (this.halfOpenCompleted >= this.halfOpenMaxAttempts) {
+        return this.transitionToOpen();
+      }
+
+      return {};
     }
 
     this.failureCount++;
@@ -103,6 +125,8 @@ export class CircuitBreaker {
       this.durationTimer = setTimeout(() => {
         this.state = CircuitBreakerState.HALF_OPEN;
         this.halfOpenAttempts = 0;
+        this.halfOpenCompleted = 0;
+        this.halfOpenFailed = false;
         this.durationTimer = undefined;
         const resolveFn = this.halfOpenResolve;
         this.halfOpenResolve = undefined;
@@ -130,6 +154,9 @@ export class CircuitBreaker {
     const failures = this.failureCount;
     this.state = CircuitBreakerState.OPEN;
     this.failureCount = 0;
+    this.halfOpenAttempts = 0;
+    this.halfOpenCompleted = 0;
+    this.halfOpenFailed = false;
     return {
       transition: CircuitBreakerState.OPEN,
       payload: { failures, threshold: this.opts.threshold },
