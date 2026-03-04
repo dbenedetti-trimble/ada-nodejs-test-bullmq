@@ -2,6 +2,8 @@ import { v4 } from 'uuid';
 import {
   BaseJobOptions,
   BulkJobOptions,
+  DeadLetterFilter,
+  DeadLetterMetadata,
   IoredisListener,
   JobSchedulerJson,
   MinimalQueue,
@@ -36,8 +38,9 @@ export interface ObliterateOpts {
   count?: number;
 }
 
-export interface QueueListener<JobBase extends Job = Job>
-  extends IoredisListener {
+export interface QueueListener<
+  JobBase extends Job = Job,
+> extends IoredisListener {
   /**
    * Listen to 'cleaned' event.
    *
@@ -1047,6 +1050,190 @@ export class Queue<
         return await client.xtrim(this.keys.events, 'MAXLEN', '~', maxLength);
       },
     );
+  }
+
+  /**
+   * Returns the count of jobs in this queue's waiting state,
+   * intended for use when this queue acts as a dead letter queue.
+   */
+  async getDeadLetterCount(): Promise<number> {
+    return this.getJobCountByTypes('waiting');
+  }
+
+  /**
+   * Returns paginated DLQ jobs from this queue's waiting state.
+   * Newest first.
+   */
+  async getDeadLetterJobs(
+    start?: number,
+    end?: number,
+  ): Promise<Job<DataType, ResultType, NameType>[]> {
+    return this.getJobs(['waiting'], start, end, false) as Promise<
+      Job<DataType, ResultType, NameType>[]
+    >;
+  }
+
+  /**
+   * Returns a specific DLQ job by ID, or undefined if not found.
+   */
+  async peekDeadLetter(
+    jobId: string,
+  ): Promise<Job<DataType, ResultType, NameType> | undefined> {
+    return this.getJob(jobId) as Promise<
+      Job<DataType, ResultType, NameType> | undefined
+    >;
+  }
+
+  /**
+   * Replays a single dead-lettered job back to its original source queue.
+   * Returns the new job ID in the source queue.
+   */
+  async replayDeadLetter(jobId: string): Promise<string> {
+    const job = await this.getJob(jobId);
+    if (!job) {
+      throw new Error(`Dead letter job ${jobId} not found`);
+    }
+
+    const dlqMeta = (job.data as Record<string, unknown>)?._dlqMeta as
+      | DeadLetterMetadata
+      | undefined;
+    if (!dlqMeta?.sourceQueue) {
+      throw new Error(`Dead letter job ${jobId} has no source queue metadata`);
+    }
+
+    const newJobId = v4();
+    const prefix = this.opts?.prefix ?? 'bull';
+    const sourceQueuePrefix = `${prefix}:${dlqMeta.sourceQueue}:`;
+
+    return this.scripts.replayFromDeadLetter(
+      jobId,
+      newJobId,
+      sourceQueuePrefix,
+    );
+  }
+
+  /**
+   * Replays all dead-lettered jobs matching the optional filter back to
+   * their original source queues. Returns the count of replayed jobs.
+   *
+   * Jobs are fetched in batches to avoid loading the entire DLQ into memory.
+   */
+  async replayAllDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    const batchSize = 100;
+    let replayed = 0;
+    let start = 0;
+
+    for (;;) {
+      const jobs = await this.getJobs(
+        ['waiting'],
+        start,
+        start + batchSize - 1,
+        false,
+      );
+
+      if (jobs.length === 0) {
+        break;
+      }
+
+      let skippedInBatch = 0;
+
+      for (const job of jobs) {
+        const dlqMeta = (job.data as Record<string, unknown>)?._dlqMeta as
+          | DeadLetterMetadata
+          | undefined;
+        if (!dlqMeta) {
+          skippedInBatch++;
+          continue;
+        }
+
+        if (filter?.name && job.name !== filter.name) {
+          skippedInBatch++;
+          continue;
+        }
+        if (
+          filter?.failedReason &&
+          !(dlqMeta.failedReason ?? '')
+            .toLowerCase()
+            .includes(filter.failedReason.toLowerCase())
+        ) {
+          skippedInBatch++;
+          continue;
+        }
+
+        await this.replayDeadLetter(job.id!);
+        replayed++;
+      }
+
+      // Advance past skipped jobs; replayed jobs are removed from the list
+      // so they don't shift the offset — only skipped jobs remain.
+      start += skippedInBatch;
+
+      if (jobs.length < batchSize) {
+        break;
+      }
+    }
+
+    return replayed;
+  }
+
+  /**
+   * Purges dead-lettered jobs matching the optional filter.
+   * Returns the count of removed jobs.
+   *
+   * Jobs are fetched in batches to avoid loading the entire DLQ into memory.
+   */
+  async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    const batchSize = 100;
+    let purged = 0;
+    let start = 0;
+
+    for (;;) {
+      const jobs = await this.getJobs(
+        ['waiting'],
+        start,
+        start + batchSize - 1,
+        false,
+      );
+
+      if (jobs.length === 0) {
+        break;
+      }
+
+      let skippedInBatch = 0;
+
+      for (const job of jobs) {
+        if (filter?.name || filter?.failedReason) {
+          const dlqMeta = (job.data as Record<string, unknown>)?._dlqMeta as
+            | DeadLetterMetadata
+            | undefined;
+
+          if (filter.name && job.name !== filter.name) {
+            skippedInBatch++;
+            continue;
+          }
+          if (
+            filter.failedReason &&
+            !(dlqMeta?.failedReason ?? '')
+              .toLowerCase()
+              .includes(filter.failedReason.toLowerCase())
+          ) {
+            skippedInBatch++;
+            continue;
+          }
+        }
+
+        await job.remove();
+        purged++;
+      }
+
+      start += skippedInBatch;
+
+      if (jobs.length < batchSize) {
+        break;
+      }
+    }
+
+    return purged;
   }
 
   /**

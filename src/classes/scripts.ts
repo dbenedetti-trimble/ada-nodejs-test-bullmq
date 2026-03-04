@@ -3,6 +3,7 @@
  */
 
 'use strict';
+import { v4 } from 'uuid';
 import { Packr } from 'msgpackr';
 
 const packer = new Packr({
@@ -13,11 +14,13 @@ const packer = new Packr({
 const pack = packer.pack;
 
 import {
+  DeadLetterFilter,
   JobJson,
   JobJsonRaw,
   MinimalJob,
   MoveToWaitingChildrenOpts,
   ParentKeyOpts,
+  QueueOptions,
   RedisClient,
   WorkerOptions,
   MoveToDelayedOpts,
@@ -1754,6 +1757,123 @@ export class Scripts {
         jobs,
       };
     }
+  }
+
+  moveToDeadLetterArgs<T = any, R = any, N extends string = string>(
+    job: MinimalJob<T, R, N>,
+    failedReason: string,
+    dlqQueueName: string,
+    token: string,
+    removeOnFail: boolean | number | KeepJobs | undefined,
+    sourceQueueName: string,
+    fieldsToUpdate?: Record<string, any>,
+  ): (string | number | boolean | Buffer)[] {
+    const queueKeys = this.queue.keys;
+    const redisPrefix = this.queue.opts.prefix ?? 'bull';
+    const dlqPrefix = `${redisPrefix}:${dlqQueueName}:`;
+    const dlqJobId = `dlq:${v4()}`;
+
+    const keys: string[] = [
+      queueKeys.active,
+      this.queue.toKey(job.id ?? ''),
+      queueKeys.events,
+      `${dlqPrefix}wait`,
+      `${dlqPrefix}${dlqJobId}`,
+      `${dlqPrefix}events`,
+      `${dlqPrefix}meta`,
+    ];
+
+    const sourceMaxEvents =
+      (this.queue.opts as QueueOptions)?.streams?.events?.maxLen ?? 10000;
+    const dlqMaxEvents = sourceMaxEvents;
+
+    const args: (string | number)[] = [
+      job.id ?? '',
+      dlqJobId,
+      dlqQueueName,
+      failedReason ?? '',
+      Date.now(),
+      token,
+      sourceQueueName,
+      queueKeys.stalled,
+      sourceMaxEvents,
+      dlqMaxEvents,
+      fieldsToUpdate?.stacktrace ?? '[]',
+    ];
+
+    return [...keys, ...args];
+  }
+
+  async moveToDeadLetter(
+    jobId: string,
+    args: (string | number | boolean | Buffer)[],
+  ): Promise<string | void> {
+    const client = await this.queue.client;
+
+    const result = await this.execCommand(client, 'moveToDeadLetter', args);
+    if (result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId,
+        command: 'moveToDeadLetter',
+        state: 'active',
+      });
+    }
+
+    return result;
+  }
+
+  async replayFromDeadLetter(
+    jobId: string,
+    newJobId: string,
+    sourceQueuePrefix: string,
+  ): Promise<string> {
+    const client = await this.queue.client;
+    const queueKeys = this.queue.keys;
+
+    const keys: string[] = [
+      this.queue.toKey(jobId),
+      queueKeys.wait,
+      `${sourceQueuePrefix}wait`,
+      `${sourceQueuePrefix}${newJobId}`,
+    ];
+
+    const args = [jobId, newJobId, Date.now()];
+
+    const result = await this.execCommand(client, 'replayFromDeadLetter', [
+      ...keys,
+      ...args,
+    ]);
+
+    if (typeof result === 'number' && result < 0) {
+      throw this.finishedErrors({
+        code: result,
+        jobId,
+        command: 'replayFromDeadLetter',
+      });
+    }
+
+    return result;
+  }
+
+  async purgeDeadLetters(filter?: DeadLetterFilter): Promise<number> {
+    const client = await this.queue.client;
+    const queueKeys = this.queue.keys;
+
+    const keys: string[] = [queueKeys.wait, queueKeys.meta];
+
+    const args = [
+      filter?.name ?? '',
+      filter?.failedReason ?? '',
+      queueKeys[''],
+    ];
+
+    const result = await this.execCommand(client, 'purgeDeadLetters', [
+      ...keys,
+      ...args,
+    ]);
+
+    return result ?? 0;
   }
 
   finishedErrors({
