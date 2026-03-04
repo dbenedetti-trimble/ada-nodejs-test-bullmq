@@ -39,15 +39,24 @@ export class Backoffs {
 
     linear: function (delay: number, jitter = 0) {
       return function (attemptsMade: number): number {
-        // TODO: implement in features pass
-        return 0;
+        const rawDelay = delay * attemptsMade;
+        if (jitter > 0) {
+          const minDelay = rawDelay * (1 - jitter);
+          return Math.floor(Math.random() * rawDelay * jitter + minDelay);
+        }
+        return rawDelay;
       };
     },
 
     polynomial: function (delay: number, jitter = 0, opts?: BackoffOptions) {
+      const exponent = opts?.exponent ?? 2;
       return function (attemptsMade: number): number {
-        // TODO: implement in features pass
-        return 0;
+        const rawDelay = delay * Math.pow(attemptsMade, exponent);
+        if (jitter > 0) {
+          const minDelay = rawDelay * (1 - jitter);
+          return Math.floor(Math.random() * rawDelay * jitter + minDelay);
+        }
+        return rawDelay;
       };
     },
 
@@ -56,14 +65,21 @@ export class Backoffs {
       _jitter = 0,
       opts?: BackoffOptions,
     ) {
+      const maxDelayCap = opts?.maxDelay || 0;
       return function (
         attemptsMade: number,
         _type?: string,
         _err?: Error,
         job?: MinimalJob,
       ): number {
-        // TODO: implement in features pass
-        return 0;
+        const prevDelay = attemptsMade > 1 && job?.delay ? job.delay : delay;
+        const upper = prevDelay * 3;
+        const computed = delay + Math.random() * (upper - delay);
+        let result = Math.max(delay, computed);
+        if (maxDelayCap > 0) {
+          result = Math.min(maxDelayCap, result);
+        }
+        return Math.round(result);
       };
     },
   };
@@ -81,19 +97,26 @@ export class Backoffs {
     }
   }
 
-  static calculate(
+  static async calculate(
     backoff: BackoffOptions,
     attemptsMade: number,
     err: Error,
     job: MinimalJob,
     customStrategy?: BackoffStrategy,
-  ): Promise<number> | number | undefined {
+  ): Promise<number | undefined> {
     if (backoff) {
       const strategy = lookupStrategy(backoff, customStrategy);
 
-      const rawDelay = strategy(attemptsMade, backoff.type, err, job);
+      const rawDelay = await strategy(attemptsMade, backoff.type, err, job);
 
-      // TODO: apply maxDelay clamping in features pass
+      if (
+        typeof rawDelay === 'number' &&
+        backoff.maxDelay &&
+        backoff.maxDelay > 0 &&
+        rawDelay > backoff.maxDelay
+      ) {
+        return backoff.maxDelay;
+      }
       return rawDelay;
     }
   }

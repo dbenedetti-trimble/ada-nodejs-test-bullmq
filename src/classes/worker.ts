@@ -179,10 +179,7 @@ export interface WorkerListener<
    * This event is triggered when the circuit breaker transitions to the OPEN state
    * after reaching the failure threshold.
    */
-  'circuit:open': (payload: {
-    failures: number;
-    threshold: number;
-  }) => void;
+  'circuit:open': (payload: { failures: number; threshold: number }) => void;
 
   /**
    * Listen to 'circuit:half-open' event.
@@ -302,6 +299,26 @@ export class Worker<
     this.id = v4();
 
     if (this.opts.circuitBreaker) {
+      const cb = this.opts.circuitBreaker;
+      if (
+        !Number.isInteger(cb.threshold) ||
+        cb.threshold <= 0 ||
+        !Number.isInteger(cb.duration) ||
+        cb.duration <= 0
+      ) {
+        throw new Error(
+          'circuitBreaker requires positive integer threshold and duration',
+        );
+      }
+      if (
+        cb.halfOpenMaxAttempts !== undefined &&
+        (!Number.isInteger(cb.halfOpenMaxAttempts) ||
+          cb.halfOpenMaxAttempts <= 0)
+      ) {
+        throw new Error(
+          'circuitBreaker halfOpenMaxAttempts must be a positive integer',
+        );
+      }
       this.circuitBreaker = new CircuitBreaker(this.opts.circuitBreaker);
     }
 
@@ -636,6 +653,25 @@ export class Worker<
        * This inner loop tries to fetch jobs concurrently, but if we are waiting for a job
        * to arrive at the queue we should not try to fetch more jobs (as it would be pointless)
        */
+      if (
+        this.circuitBreaker &&
+        this.circuitBreaker.getState() === CircuitBreakerState.OPEN
+      ) {
+        await this.circuitBreaker.waitForHalfOpen();
+        if (
+          !this.closing &&
+          this.circuitBreaker.getState() === CircuitBreakerState.HALF_OPEN
+        ) {
+          this.drained = false;
+          this.emit('circuit:half-open', {
+            duration: this.opts.circuitBreaker.duration,
+          });
+        }
+        if (this.closing || this.paused) {
+          continue;
+        }
+      }
+
       while (
         !this.closing &&
         !this.paused &&
@@ -1121,6 +1157,13 @@ will never work with more accuracy than 1ms. */
       );
       this.emit('completed', job, result, 'active');
 
+      if (this.circuitBreaker) {
+        const transition = this.circuitBreaker.recordSuccess(job.id);
+        if (transition.transition === CircuitBreakerState.CLOSED) {
+          this.emit('circuit:closed', transition.payload);
+        }
+      }
+
       span?.addEvent('job completed', {
         [TelemetryAttributes.JobResult]: JSON.stringify(result),
       });
@@ -1172,6 +1215,13 @@ will never work with more accuracy than 1ms. */
       );
 
       this.emit('failed', job, err, 'active');
+
+      if (this.circuitBreaker) {
+        const transition = this.circuitBreaker.recordFailure();
+        if (transition.transition === CircuitBreakerState.OPEN) {
+          this.emit('circuit:open', transition.payload);
+        }
+      }
 
       span?.addEvent('job failed', {
         [TelemetryAttributes.JobFailedReason]: err.message,
