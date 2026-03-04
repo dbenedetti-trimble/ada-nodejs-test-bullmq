@@ -1,6 +1,7 @@
 export * from './async-fifo-queue';
 export * from './backoffs';
 export * from './child';
+export * from './circuit-breaker';
 export * from './child-pool';
 export * from './child-processor';
 export * from './errors';
